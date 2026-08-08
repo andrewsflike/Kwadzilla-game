@@ -10,6 +10,90 @@
   'use strict';
 
   /* ------------------------------------------------------------------ */
+  /* Kwadzilla sprite art                                                */
+  /* ------------------------------------------------------------------ */
+
+  // Assets live flat in the theme's assets/ folder (Shopify allows no
+  // subdirectories there), so sibling files resolve relative to THIS
+  // script's own URL rather than a hardcoded path — that works identically
+  // whether it's loaded from the Shopify CDN or the local index.html demo,
+  // which is the whole point of this file being framework-free. Must be
+  // read synchronously at the top of the script (before any async/await
+  // point) for document.currentScript to still point at us.
+  var ASSET_BASE = (function () {
+    var cur = document.currentScript;
+    if (cur && cur.src) return cur.src.replace(/[^/]*$/, '');
+    var scripts = document.getElementsByTagName('script');
+    for (var i = scripts.length - 1; i >= 0; i--) {
+      if (/kwadzilla-game\.js/.test(scripts[i].src)) return scripts[i].src.replace(/[^/]*$/, '');
+    }
+    return '';
+  })();
+
+  // Per-frame anchor: (ax, ay) is the point within the source image that
+  // should land on Kwadzilla's world position (x, y) — i.e. where the
+  // original procedural pose function's local origin (0,0) used to be.
+  // Computed once from each PNG's actual opaque bounding box, not guessed.
+  var KWAD_META = {
+    idle:    { w: 96, h: 80, ax: 44.0, ay: 79 },
+    walk_a:  { w: 96, h: 80, ax: 45.0, ay: 79 },
+    walk_b:  { w: 96, h: 80, ax: 47.5, ay: 79 },
+    punch:   { w: 96, h: 80, ax: 47.5, ay: 79 },
+    climb_a: { w: 96, h: 80, ax: 46.0, ay: 79 },
+    climb_b: { w: 96, h: 80, ax: 50.5, ay: 79 },
+    roar:    { w: 96, h: 80, ax: 47.0, ay: 79 }
+  };
+  var KWAD_FILES = {
+    idle: 'kwad-idle.png', walk_a: 'kwad-walk-a.png', walk_b: 'kwad-walk-b.png',
+    punch: 'kwad-punch.png', climb_a: 'kwad-climb-a.png', climb_b: 'kwad-climb-b.png',
+    roar: 'kwad-roar.png'
+  };
+  var kwadImg = {};
+  var kwadReady = false;
+  (function loadKwadSprites() {
+    var names = Object.keys(KWAD_FILES), left = names.length;
+    names.forEach(function (n) {
+      var img = new Image();
+      img.onload = img.onerror = function () { if (--left <= 0) kwadReady = true; };
+      img.src = ASSET_BASE + KWAD_FILES[n];
+      kwadImg[n] = img;
+    });
+  })();
+
+  var TILE_FILES = {
+    wall: 'tile-wall.png', window_dark: 'tile-window-dark.png',
+    window_lit: 'tile-window-lit.png', door: 'tile-door.png',
+    roof_trim: 'tile-roof-trim.png'
+  };
+  var tileImg = {};
+  var tilesReady = false;
+  (function loadTiles() {
+    var names = Object.keys(TILE_FILES), left = names.length;
+    names.forEach(function (n) {
+      var img = new Image();
+      img.onload = img.onerror = function () { if (--left <= 0) tilesReady = true; };
+      img.src = ASSET_BASE + TILE_FILES[n];
+      tileImg[n] = img;
+    });
+  })();
+
+  var FOE_FILES = {
+    chopper: 'foe-chopper.png', gunship: 'foe-gunship.png', van: 'foe-van.png',
+    jet: 'foe-jet.png', turret: 'foe-turret.png'
+  };
+  var foeImg = {};
+  var foesReady = false;
+  (function loadFoeSprites() {
+    var names = Object.keys(FOE_FILES), left = names.length;
+    names.forEach(function (n) {
+      var img = new Image();
+      img.onload = img.onerror = function () { if (--left <= 0) foesReady = true; };
+      img.src = ASSET_BASE + FOE_FILES[n];
+      foeImg[n] = img;
+    });
+  })();
+
+  /* ------------------------------------------------------------------ */
   /* Constants                                                           */
   /* ------------------------------------------------------------------ */
 
@@ -1255,6 +1339,20 @@
     /* Drawing                                                             */
     /* ------------------------------------------------------------------ */
 
+    // Hue-rotate degrees per PALETTES index, approximating each of the 4
+    // existing building palettes from the single generated concrete tile
+    // set (which reads close to PALETTES[2]'s blue-gray) rather than
+    // spending 4x the generation cost on a separate tile set per palette.
+    var TILE_HUE = [-15, 175, 0, 60];
+
+    function cellTileImg(v) {
+      if (v === 2) return tileImg.window_dark;
+      if (v === 3) return tileImg.window_lit;
+      if (v === 6) return tileImg.door;
+      if (v === 5) return tileImg.roof_trim;
+      return tileImg.wall;   // v===1 plain wall, v===4 sign band (text drawn separately)
+    }
+
     function renderBuilding(b) {
       var h = Math.max(1, b.rows.length * CELL);
       if (!b.cv) { b.cv = document.createElement('canvas'); b.ctx = null; }
@@ -1265,6 +1363,52 @@
       c.clearRect(0, 0, b.w, h);
       var pal = b.pal;
 
+      if (tilesReady) {
+        var hue = TILE_HUE[b.def.pal % TILE_HUE.length];
+        c.filter = hue ? 'hue-rotate(' + hue + 'deg)' : 'none';
+        for (var r = 0; r < b.rows.length; r++) {
+          var row = b.rows[r];
+          for (var col = 0; col < b.cols; col++) {
+            var v = row[col];
+            if (!v) continue;
+            c.drawImage(cellTileImg(v), col * CELL, r * CELL, CELL, CELL);
+          }
+        }
+        c.filter = 'none';
+        // Thin cell-boundary bevel, unaffected by the hue filter (drawn
+        // from the theme's own palette so it stays legible) — keeps
+        // individual destructible cells readable against the material art.
+        for (var r2 = 0; r2 < b.rows.length; r2++) {
+          var row2 = b.rows[r2], above2 = b.rows[r2 - 1], below2 = b.rows[r2 + 1];
+          for (var col2 = 0; col2 < b.cols; col2++) {
+            if (!row2[col2]) continue;
+            var x2 = col2 * CELL, y2 = r2 * CELL;
+            if (!above2 || !above2[col2]) { c.fillStyle = pal.a; c.fillRect(x2, y2, CELL, 1); }
+            if (!row2[col2 - 1]) { c.fillStyle = pal.a; c.fillRect(x2, y2, 1, CELL); }
+            if (!row2[col2 + 1]) { c.fillStyle = pal.d; c.fillRect(x2 + CELL - 1, y2, 1, CELL); }
+            if (below2 && !below2[col2]) { c.fillStyle = pal.d; c.fillRect(x2, y2 + CELL - 1, CELL, 1); }
+          }
+        }
+      } else {
+        renderBuildingProcedural(b, c, pal);
+      }
+
+      // Facility sign, so long as the band that carries it is mostly intact.
+      if (b.rows.length > 3) {
+        var band = b.rows[1];
+        if (band && rowAlive(band) > b.cols * 0.7) {
+          var tw = textW(b.sign, 1);
+          if (tw <= b.w - 4) {
+            c.fillStyle = 'rgba(0,0,0,0.45)';
+            c.fillRect((b.w - tw) / 2 - 2, CELL + 1, tw + 4, 9);
+            text(c, b.sign, b.w / 2, CELL + 2, { scale: 1, color: pal.trim, align: 'center' });
+          }
+        }
+      }
+      b.dirty = false;
+    }
+
+    function renderBuildingProcedural(b, c, pal) {
       for (var r = 0; r < b.rows.length; r++) {
         var row = b.rows[r];
         var above = b.rows[r - 1], below = b.rows[r + 1];
@@ -1297,20 +1441,6 @@
           }
         }
       }
-
-      // Facility sign, so long as the band that carries it is mostly intact.
-      if (b.rows.length > 3) {
-        var band = b.rows[1];
-        if (band && rowAlive(band) > b.cols * 0.7) {
-          var tw = textW(b.sign, 1);
-          if (tw <= b.w - 4) {
-            c.fillStyle = 'rgba(0,0,0,0.45)';
-            c.fillRect((b.w - tw) / 2 - 2, CELL + 1, tw + 4, 9);
-            text(c, b.sign, b.w / 2, CELL + 2, { scale: 1, color: pal.trim, align: 'center' });
-          }
-        }
-      }
-      b.dirty = false;
     }
 
     function drawSky() {
@@ -1562,7 +1692,46 @@
     }
 
     // Pose-driven so the attract screen can render a much bigger one.
+    // Dispatches to the AI-generated sprite sheet once it's loaded; falls
+    // back to the original procedural silhouette for the handful of frames
+    // before the (tiny, same-origin) PNGs finish loading, so there's never
+    // a blank Kwadzilla.
     function drawKwadPose(x, y, facing, pose) {
+      if (kwadReady) { drawKwadSprite(x, y, facing, pose); return; }
+      drawKwadPoseProcedural(x, y, facing, pose);
+    }
+
+    function pickKwadFrame(pose) {
+      if (pose.jaw && !pose.climb) return 'roar';
+      if (pose.climb) return Math.sin(pose.walk * 1.4) > 0 ? 'climb_a' : 'climb_b';
+      if (pose.atk > 0) return 'punch';
+      if (pose.moving) return Math.sin(pose.walk) > 0 ? 'walk_a' : 'walk_b';
+      return 'idle';
+    }
+
+    function drawKwadSprite(x, y, facing, pose) {
+      var name = pickKwadFrame(pose);
+      var img = kwadImg[name], meta = KWAD_META[name];
+      var sc = pose.scale || 1;
+      var bob = pose.climb ? 0 : Math.round(Math.sin(pose.walk) * 1);
+
+      g.save();
+      g.translate(x, y + bob);
+      g.scale(facing * sc, sc);
+      g.drawImage(img, -meta.ax, -meta.ay, meta.w, meta.h);
+
+      // Same forward motion-blur streak the procedural punch used to draw —
+      // cheap, reads well, doesn't need to be baked into the generated art.
+      if (!pose.climb && pose.atk > 4 && pose.atk < 12) {
+        g.globalAlpha = 0.5;
+        g.fillStyle = '#fff';
+        g.fillRect(30, -40, 3, 18);
+        g.globalAlpha = 1;
+      }
+      g.restore();
+    }
+
+    function drawKwadPoseProcedural(x, y, facing, pose) {
       var sc = pose.scale || 1;
       g.save();
       g.translate(x, y);
@@ -1697,6 +1866,31 @@
       }
     }
 
+    // Anchor is where world (x,y) lands within the source image — center
+    // for flying foes (they're positioned by their middle), bottom-center
+    // for ground-mounted ones (van sits on the road, turret sits on a
+    // roof), matching how the physics code already treats f.x/f.y for each.
+    var FOE_META = {
+      chopper: { w: 78, h: 33, ax: 37.5, ay: 17.0 },
+      gunship: { w: 92, h: 36, ax: 46.0, ay: 19.5 },
+      jet:     { w: 90, h: 27, ax: 45.5, ay: 13.0 },
+      van:     { w: 84, h: 45, ax: 42.5, ay: 42.0 },
+      turret:  { w: 56, h: 40, ax: 25.0, ay: 35.0 }
+    };
+
+    function drawFoeSprite(type, x, y, fl) {
+      var meta = FOE_META[type], img = foeImg[type];
+      var dx = x - meta.ax, dy = y - meta.ay;
+      if (fl) {
+        g.save();
+        g.filter = 'brightness(0) invert(1)';   // flash to a white silhouette on hit
+        g.drawImage(img, dx, dy, meta.w, meta.h);
+        g.restore();
+      } else {
+        g.drawImage(img, dx, dy, meta.w, meta.h);
+      }
+    }
+
     function drawFoes() {
       for (var i = 0; i < foes.length; i++) {
         var f = foes[i];
@@ -1704,67 +1898,78 @@
         if (x < -60 || x > VW + 60) continue;
         var fl = f.flash > 0 && Math.floor(f.flash / 2) % 2 === 0;
 
-        if (f.type === 'chopper' || f.type === 'gunship') {
-          var big = f.type === 'gunship';
-          var w = big ? 46 : 26, h = big ? 18 : 11;
-          g.fillStyle = fl ? '#fff' : (big ? '#454b5e' : '#39404f');
-          g.fillRect(x - w / 2, y - h / 2, w, h);
-          g.fillStyle = fl ? '#fff' : '#252a36';
-          g.fillRect(x - w / 2 - (big ? 16 : 10), y - 2, big ? 16 : 10, big ? 5 : 4);   // tail boom
-          g.fillStyle = C.cyan;
-          g.fillRect(x + w / 2 - 8, y - h / 2 + 2, 6, 4);                                // cockpit
-          // rotor
-          g.fillStyle = '#8b93a6';
-          var rw = Math.abs(Math.cos(f.rot || 0)) * (big ? 34 : 22) + 4;
-          g.fillRect(x - rw, y - h / 2 - 3, rw * 2, 1);
-          g.fillRect(x - 1, y - h / 2 - 3, 2, 4);
-          // belly light
-          g.fillStyle = Math.floor(tick / 12) % 2 ? C.red : '#511';
-          g.fillRect(x - 2, y + h / 2 - 1, 3, 2);
-          if (big) {
-            g.fillStyle = '#2b3040';
-            g.fillRect(x - 16, y + h / 2, 32, 4);
-            // boss health pip
-            g.fillStyle = '#000'; g.fillRect(x - 20, y - h / 2 - 10, 40, 4);
-            g.fillStyle = C.red; g.fillRect(x - 19, y - h / 2 - 9, 38 * clamp(f.hp / 26, 0, 1), 2);
-          }
+        if (!foesReady) { drawFoeProcedural(f, x, y, fl); continue; }
 
-        } else if (f.type === 'van') {
-          g.fillStyle = fl ? '#fff' : '#3d4454';
-          g.fillRect(x - 14, y - 15, 28, 13);
-          g.fillStyle = fl ? '#fff' : '#2a3040';
-          g.fillRect(x - 14, y - 15, 10, 8);
-          g.fillStyle = '#5b6478';
-          g.fillRect(x - 12, y - 13, 5, 4);                 // windscreen (meshed)
-          g.fillStyle = '#16181f';
-          g.fillRect(x - 11, y - 3, 6, 4);
-          g.fillRect(x + 5, y - 3, 6, 4);                   // wheels
-          g.fillStyle = Math.floor(tick / 8) % 2 ? C.red : C.cyan;
-          g.fillRect(x - 3, y - 18, 7, 3);                  // light bar
-          g.fillStyle = '#6a7488';
-          for (var b = 0; b < 4; b++) g.fillRect(x - 2 + b * 4, y - 13, 1, 6);
-
-        } else if (f.type === 'jet') {
-          g.fillStyle = fl ? '#fff' : '#59627a';
-          g.fillRect(x - 15, y - 3, 30, 6);
-          g.fillStyle = '#3c4356';
-          g.fillRect(x - 4, y - 8, 12, 5);
-          g.fillStyle = C.cyan;
-          g.fillRect(x + 8, y - 2, 5, 3);
-          g.fillStyle = C.fire2;
-          g.fillRect(f.vx > 0 ? x - 17 : x + 13, y - 1, 4, 2);
-
-        } else if (f.type === 'turret') {
-          g.fillStyle = fl ? '#fff' : '#4a5162';
-          g.fillRect(x - 7, y - 2, 14, 8);
-          g.fillStyle = '#2f3542';
-          g.fillRect(x - 4, y - 7, 8, 6);
-          g.fillStyle = C.gold;
-          g.fillRect(x - 2, y - 6, 4, 3);
-          var aim = Math.atan2((P.y - 26) - y, P.x - f.x);
-          g.fillStyle = '#6b7488';
-          g.fillRect(x + Math.cos(aim) * 5 - 1, y - 5 + Math.sin(aim) * 5, 6, 2);
+        drawFoeSprite(f.type, x, y, fl);
+        if (f.type === 'gunship') {
+          // Boss health bar is HUD, not art — stays hand-drawn on top.
+          g.fillStyle = '#000'; g.fillRect(x - 20, y - 19, 40, 4);
+          g.fillStyle = C.red; g.fillRect(x - 19, y - 18, 38 * clamp(f.hp / 26, 0, 1), 2);
         }
+      }
+    }
+
+    function drawFoeProcedural(f, x, y, fl) {
+      if (f.type === 'chopper' || f.type === 'gunship') {
+        var big = f.type === 'gunship';
+        var w = big ? 46 : 26, h = big ? 18 : 11;
+        g.fillStyle = fl ? '#fff' : (big ? '#454b5e' : '#39404f');
+        g.fillRect(x - w / 2, y - h / 2, w, h);
+        g.fillStyle = fl ? '#fff' : '#252a36';
+        g.fillRect(x - w / 2 - (big ? 16 : 10), y - 2, big ? 16 : 10, big ? 5 : 4);   // tail boom
+        g.fillStyle = C.cyan;
+        g.fillRect(x + w / 2 - 8, y - h / 2 + 2, 6, 4);                                // cockpit
+        // rotor
+        g.fillStyle = '#8b93a6';
+        var rw = Math.abs(Math.cos(f.rot || 0)) * (big ? 34 : 22) + 4;
+        g.fillRect(x - rw, y - h / 2 - 3, rw * 2, 1);
+        g.fillRect(x - 1, y - h / 2 - 3, 2, 4);
+        // belly light
+        g.fillStyle = Math.floor(tick / 12) % 2 ? C.red : '#511';
+        g.fillRect(x - 2, y + h / 2 - 1, 3, 2);
+        if (big) {
+          g.fillStyle = '#2b3040';
+          g.fillRect(x - 16, y + h / 2, 32, 4);
+          // boss health pip
+          g.fillStyle = '#000'; g.fillRect(x - 20, y - h / 2 - 10, 40, 4);
+          g.fillStyle = C.red; g.fillRect(x - 19, y - h / 2 - 9, 38 * clamp(f.hp / 26, 0, 1), 2);
+        }
+
+      } else if (f.type === 'van') {
+        g.fillStyle = fl ? '#fff' : '#3d4454';
+        g.fillRect(x - 14, y - 15, 28, 13);
+        g.fillStyle = fl ? '#fff' : '#2a3040';
+        g.fillRect(x - 14, y - 15, 10, 8);
+        g.fillStyle = '#5b6478';
+        g.fillRect(x - 12, y - 13, 5, 4);                 // windscreen (meshed)
+        g.fillStyle = '#16181f';
+        g.fillRect(x - 11, y - 3, 6, 4);
+        g.fillRect(x + 5, y - 3, 6, 4);                   // wheels
+        g.fillStyle = Math.floor(tick / 8) % 2 ? C.red : C.cyan;
+        g.fillRect(x - 3, y - 18, 7, 3);                  // light bar
+        g.fillStyle = '#6a7488';
+        for (var b = 0; b < 4; b++) g.fillRect(x - 2 + b * 4, y - 13, 1, 6);
+
+      } else if (f.type === 'jet') {
+        g.fillStyle = fl ? '#fff' : '#59627a';
+        g.fillRect(x - 15, y - 3, 30, 6);
+        g.fillStyle = '#3c4356';
+        g.fillRect(x - 4, y - 8, 12, 5);
+        g.fillStyle = C.cyan;
+        g.fillRect(x + 8, y - 2, 5, 3);
+        g.fillStyle = C.fire2;
+        g.fillRect(f.vx > 0 ? x - 17 : x + 13, y - 1, 4, 2);
+
+      } else if (f.type === 'turret') {
+        g.fillStyle = fl ? '#fff' : '#4a5162';
+        g.fillRect(x - 7, y - 2, 14, 8);
+        g.fillStyle = '#2f3542';
+        g.fillRect(x - 4, y - 7, 8, 6);
+        g.fillStyle = C.gold;
+        g.fillRect(x - 2, y - 6, 4, 3);
+        var aim = Math.atan2((P.y - 26) - y, P.x - f.x);
+        g.fillStyle = '#6b7488';
+        g.fillRect(x + Math.cos(aim) * 5 - 1, y - 5 + Math.sin(aim) * 5, 6, 2);
       }
     }
 
