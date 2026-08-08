@@ -1,0 +1,98 @@
+{% comment %}
+  KWADZILLA ARCADE — theme-block section (Horizon and friends)
+
+  An empty arcade-night canvas that accepts any theme or app block. Compose it
+  with the theme's own heading/text blocks plus the Kwadzilla game block.
+
+  If you'd rather have the whole splash page — headline, copy, feature grid and
+  footnote — prebuilt in one piece, use sections/kwadzilla-game.liquid instead.
+  That one works on Dawn-era themes too, which have no theme blocks.
+{% endcomment %}
+
+{{ 'kwadzilla-game.css' | asset_url | stylesheet_tag }}
+
+<div
+  class="kwad-hero{% if section.settings.backdrop == 'scheme' %} kwad-hero--plain color-{{ section.settings.color_scheme }}{% endif %}"
+  style="
+    --kwad-acid: {{ section.settings.color_accent }};
+    --kwad-hot: {{ section.settings.color_secondary }};
+    padding-top: {{ section.settings.padding_top }}px;
+    padding-bottom: {{ section.settings.padding_bottom }}px;
+  ">
+  <div class="kwad-hero__inner">
+    {% content_for 'blocks' %}
+  </div>
+</div>
+
+{% schema %}
+{
+  "name": "Kwadzilla arcade",
+  "tag": "section",
+  "class": "kwadzilla-arcade-section",
+  "blocks": [{ "type": "@theme" }, { "type": "@app" }],
+  "settings": [
+    {
+      "type": "select",
+      "id": "backdrop",
+      "label": "Backdrop",
+      "options": [
+        { "value": "arcade", "label": "Arcade night" },
+        { "value": "scheme", "label": "Theme colour scheme" }
+      ],
+      "default": "arcade"
+    },
+    {
+      "type": "color_scheme",
+      "id": "color_scheme",
+      "label": "Colour scheme",
+      "info": "Used when Backdrop is set to Theme colour scheme.",
+      "default": "scheme-1"
+    },
+    {
+      "type": "color",
+      "id": "color_accent",
+      "label": "Accent",
+      "default": "#6ef2a0"
+    },
+    {
+      "type": "color",
+      "id": "color_secondary",
+      "label": "Secondary accent",
+      "default": "#ff3d7f"
+    },
+    {
+      "type": "range",
+      "id": "padding_top",
+      "label": "Top padding",
+      "min": 0,
+      "max": 120,
+      "step": 4,
+      "unit": "px",
+      "default": 56
+    },
+    {
+      "type": "range",
+      "id": "padding_bottom",
+      "label": "Bottom padding",
+      "min": 0,
+      "max": 120,
+      "step": 4,
+      "unit": "px",
+      "default": 56
+    }
+  ],
+  "presets": [
+    {
+      "name": "Kwadzilla arcade",
+      "blocks": [
+        {
+          "type": "kwadzilla-game",
+          "settings": {
+            "surface": "none"
+          }
+        }
+      ]
+    }
+  ]
+}
+{% endschema %}

@@ -1,0 +1,195 @@
+{% comment %}
+  KWADZILLA — theme block
+
+  A theme block, so it shows up in the block picker of Horizon (and any other
+  theme built on theme blocks) and can be dropped into any section that accepts
+  @theme blocks — including Horizon's own layout sections.
+
+  This renders just the arcade cabinet. Use the theme's own heading/text blocks
+  around it for copy, or use sections/kwadzilla-game.liquid if you'd rather have
+  the whole splash page in one piece.
+
+  Install: copy this file into your theme's blocks/ folder, and
+  assets/kwadzilla-game.js + assets/kwadzilla-game.css into assets/.
+{% endcomment %}
+
+{{ 'kwadzilla-game.css' | asset_url | stylesheet_tag }}
+
+<div
+  class="kwad-embed{% if block.settings.surface == 'dark' %} kwad-embed--dark{% endif %}{% if block.settings.surface == 'scheme' %} color-{{ block.settings.color_scheme }}{% endif %}"
+  style="
+    --kwad-acid: {{ block.settings.color_accent }};
+    --kwad-hot: {{ block.settings.color_secondary }};
+    max-width: {{ block.settings.max_width }}px;
+    margin-inline: auto;
+  ">
+
+  <div
+    data-kwadzilla
+    data-cta-1-label="{{ block.settings.cta_1_label | escape }}"
+    data-cta-1-url="{{ block.settings.cta_1_link }}"
+    data-cta-2-label="{{ block.settings.cta_2_label | escape }}"
+    data-cta-2-url="{{ block.settings.cta_2_link }}"
+    data-reward-code="{{ block.settings.reward_code | escape }}"
+    data-reward-label="{{ block.settings.reward_label | escape }}"
+    data-reward-note="{{ block.settings.reward_note | escape }}"
+    data-reward-score="{{ block.settings.reward_score }}"
+    data-sound="{% if block.settings.sound_on %}on{% else %}off{% endif %}"></div>
+
+  {%- if block.settings.show_buttons -%}
+    {%- if block.settings.cta_1_label != blank or block.settings.cta_2_label != blank -%}
+      <div class="kwad-hero__cta">
+        {%- if block.settings.cta_1_label != blank -%}
+          <a class="kwad-btn kwad-btn--go" href="{{ block.settings.cta_1_link | default: '#' }}">
+            {{ block.settings.cta_1_label | escape }}
+          </a>
+        {%- endif -%}
+        {%- if block.settings.cta_2_label != blank -%}
+          <a class="kwad-btn kwad-btn--ghost" href="{{ block.settings.cta_2_link | default: '#' }}">
+            {{ block.settings.cta_2_label | escape }}
+          </a>
+        {%- endif -%}
+      </div>
+    {%- endif -%}
+  {%- endif -%}
+
+</div>
+
+<script src="{{ 'kwadzilla-game.js' | asset_url }}" defer></script>
+
+{% schema %}
+{
+  "name": "Kwadzilla game",
+  "settings": [
+    {
+      "type": "header",
+      "content": "Layout"
+    },
+    {
+      "type": "select",
+      "id": "surface",
+      "label": "Backdrop",
+      "options": [
+        { "value": "none", "label": "None (inherit section)" },
+        { "value": "dark", "label": "Arcade night" },
+        { "value": "scheme", "label": "Theme colour scheme" }
+      ],
+      "default": "dark"
+    },
+    {
+      "type": "color_scheme",
+      "id": "color_scheme",
+      "label": "Colour scheme",
+      "info": "Used when Backdrop is set to Theme colour scheme.",
+      "default": "scheme-1"
+    },
+    {
+      "type": "range",
+      "id": "max_width",
+      "label": "Maximum width",
+      "min": 480,
+      "max": 1200,
+      "step": 20,
+      "unit": "px",
+      "default": 940
+    },
+    {
+      "type": "header",
+      "content": "Buttons"
+    },
+    {
+      "type": "checkbox",
+      "id": "show_buttons",
+      "label": "Show buttons under the cabinet",
+      "info": "The buttons always appear on the game over screen regardless.",
+      "default": true
+    },
+    {
+      "type": "text",
+      "id": "cta_1_label",
+      "label": "Primary button label",
+      "default": "Shop the drop"
+    },
+    {
+      "type": "url",
+      "id": "cta_1_link",
+      "label": "Primary button link"
+    },
+    {
+      "type": "text",
+      "id": "cta_2_label",
+      "label": "Secondary button label",
+      "default": "Read the story"
+    },
+    {
+      "type": "url",
+      "id": "cta_2_link",
+      "label": "Secondary button link"
+    },
+    {
+      "type": "header",
+      "content": "Reward",
+      "info": "Create the matching discount code in Discounts before you turn this on."
+    },
+    {
+      "type": "text",
+      "id": "reward_code",
+      "label": "Discount code to reveal",
+      "info": "Leave blank to disable the reward entirely."
+    },
+    {
+      "type": "text",
+      "id": "reward_label",
+      "label": "Reward headline",
+      "default": "Sector cleared — take 15% off"
+    },
+    {
+      "type": "text",
+      "id": "reward_note",
+      "label": "Reward small print",
+      "default": "One use per customer. Applies at checkout."
+    },
+    {
+      "type": "number",
+      "id": "reward_score",
+      "label": "Score needed to unlock",
+      "default": 20000
+    },
+    {
+      "type": "header",
+      "content": "Appearance"
+    },
+    {
+      "type": "color",
+      "id": "color_accent",
+      "label": "Accent",
+      "default": "#6ef2a0"
+    },
+    {
+      "type": "color",
+      "id": "color_secondary",
+      "label": "Secondary accent",
+      "default": "#ff3d7f"
+    },
+    {
+      "type": "checkbox",
+      "id": "sound_on",
+      "label": "Sound on by default",
+      "info": "Audio only ever starts after the visitor interacts with the page.",
+      "default": true
+    }
+  ],
+  "presets": [
+    {
+      "name": "Kwadzilla game"
+    },
+    {
+      "name": "Kwadzilla game (plain)",
+      "settings": {
+        "surface": "none",
+        "show_buttons": false
+      }
+    }
+  ]
+}
+{% endschema %}

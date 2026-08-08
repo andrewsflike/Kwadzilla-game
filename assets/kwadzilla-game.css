@@ -4,7 +4,11 @@
  * so it can be dropped into any Shopify theme without leaking.
  */
 
-.kwad-hero {
+/* Design tokens live on both the full-page hero and the standalone embed, so
+   the arcade cabinet looks the same dropped into a Horizon theme block as it
+   does inside our own section. */
+.kwad-hero,
+.kwad-embed {
   --kwad-bg: #070a18;
   --kwad-bg-2: #150e2e;
   --kwad-ink: #eaf2ff;
@@ -16,6 +20,11 @@
   --kwad-edge: rgba(110, 242, 160, 0.28);
   --kwad-mono: ui-monospace, "SFMono-Regular", "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
 
+  font-family: var(--kwad-mono);
+  text-align: center;
+}
+
+.kwad-hero {
   position: relative;
   isolation: isolate;
   overflow: hidden;
@@ -25,8 +34,42 @@
     radial-gradient(90% 60% at 80% 100%, #0d2b44 0%, rgba(13, 43, 68, 0) 65%),
     linear-gradient(180deg, var(--kwad-bg) 0%, var(--kwad-bg-2) 55%, #090c1c 100%);
   color: var(--kwad-ink);
-  font-family: var(--kwad-mono);
-  text-align: center;
+}
+
+/* Embedded as a theme block. Transparent by default so it sits inside whatever
+   colour scheme the surrounding Horizon section is using. */
+.kwad-embed {
+  color: inherit;
+}
+
+.kwad-embed .kwad-game { margin-top: 0; }
+
+/* With no backdrop of our own, the surrounding scheme may well be light, and
+   acid green on cream is unreadable. Borrow the scheme's own text colour. */
+.kwad-embed:not(.kwad-embed--dark) .kwad-btn--ghost,
+.kwad-hero--plain .kwad-btn--ghost {
+  color: inherit;
+  border-color: currentColor;
+  opacity: 0.85;
+}
+
+.kwad-embed:not(.kwad-embed--dark) .kwad-btn--ghost:hover,
+.kwad-embed:not(.kwad-embed--dark) .kwad-btn--ghost:focus-visible,
+.kwad-hero--plain .kwad-btn--ghost:hover,
+.kwad-hero--plain .kwad-btn--ghost:focus-visible {
+  opacity: 1;
+  background: currentColor;
+  color: canvas;
+}
+
+/* …or opt into the arcade backdrop as a self-contained panel. */
+.kwad-embed--dark {
+  padding: clamp(1rem, 3vw, 2rem);
+  border-radius: 16px;
+  color: var(--kwad-ink);
+  background:
+    radial-gradient(120% 90% at 50% 0%, #3a1552 0%, rgba(58, 21, 82, 0) 62%),
+    linear-gradient(180deg, var(--kwad-bg) 0%, var(--kwad-bg-2) 60%, #090c1c 100%);
 }
 
 /* Horizon glow + starfield, pure CSS so there are no image requests. */
@@ -584,3 +627,12 @@
   .kwad-btn:hover, .kwad-btn:focus-visible { transform: none; }
   .kwad-scan { opacity: 0.25; }
 }
+
+/* Theme-block section using the merchant's own colour scheme instead of the
+   arcade backdrop: drop our gradient and inherit the scheme's colours. */
+.kwad-hero--plain {
+  background: none;
+  color: inherit;
+}
+
+.kwad-hero--plain::before { display: none; }
