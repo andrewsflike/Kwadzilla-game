@@ -1,0 +1,255 @@
+{% comment %}
+  KWADZILLA — THE BIGGEST LIZARD BREAKS OUT
+  A playable arcade splash section.
+
+  Install:
+    1. Copy assets/kwadzilla-game.js and assets/kwadzilla-game.css into your
+       theme's assets/ folder.
+    2. Copy this file into sections/.
+    3. Add the section to any page in the theme editor, or use the
+       templates/page.kwadzilla.json page template.
+{% endcomment %}
+
+{{ 'kwadzilla-game.css' | asset_url | stylesheet_tag }}
+
+<section
+  class="kwad-hero"
+  id="kwadzilla-{{ section.id }}"
+  style="
+    --kwad-acid: {{ section.settings.color_accent }};
+    --kwad-hot: {{ section.settings.color_secondary }};
+    --kwad-bg: {{ section.settings.color_bg }};
+    --kwad-bg-2: {{ section.settings.color_bg_2 }};
+  ">
+  <div class="kwad-hero__inner">
+
+    {%- if section.settings.eyebrow != blank -%}
+      <p class="kwad-hero__eyebrow"><span>{{ section.settings.eyebrow | escape }}</span></p>
+    {%- endif -%}
+
+    <h1 class="kwad-hero__title">
+      {{ section.settings.heading | escape }}
+      {%- if section.settings.subheading != blank -%}
+        <small>{{ section.settings.subheading | escape }}</small>
+      {%- endif -%}
+    </h1>
+
+    {%- if section.settings.intro != blank -%}
+      <div class="kwad-hero__sub">{{ section.settings.intro }}</div>
+    {%- endif -%}
+
+    <div
+      data-kwadzilla
+      data-cta-1-label="{{ section.settings.cta_1_label | escape }}"
+      data-cta-1-url="{{ section.settings.cta_1_link }}"
+      data-cta-2-label="{{ section.settings.cta_2_label | escape }}"
+      data-cta-2-url="{{ section.settings.cta_2_link }}"
+      data-reward-code="{{ section.settings.reward_code | escape }}"
+      data-reward-label="{{ section.settings.reward_label | escape }}"
+      data-reward-note="{{ section.settings.reward_note | escape }}"
+      data-reward-score="{{ section.settings.reward_score }}"
+      data-sound="{% if section.settings.sound_on %}on{% else %}off{% endif %}"></div>
+
+    {%- if section.settings.cta_1_label != blank or section.settings.cta_2_label != blank -%}
+      <div class="kwad-hero__cta">
+        {%- if section.settings.cta_1_label != blank -%}
+          <a class="kwad-btn kwad-btn--go" href="{{ section.settings.cta_1_link | default: '#' }}">
+            {{ section.settings.cta_1_label | escape }}
+          </a>
+        {%- endif -%}
+        {%- if section.settings.cta_2_label != blank -%}
+          <a class="kwad-btn kwad-btn--ghost" href="{{ section.settings.cta_2_link | default: '#' }}">
+            {{ section.settings.cta_2_label | escape }}
+          </a>
+        {%- endif -%}
+      </div>
+    {%- endif -%}
+
+    {%- if section.blocks.size > 0 -%}
+      <ul class="kwad-facts">
+        {%- for block in section.blocks -%}
+          <li {{ block.shopify_attributes }}>
+            {%- if block.settings.title != blank -%}<b>{{ block.settings.title | escape }}</b>{%- endif -%}
+            {%- if block.settings.text != blank -%}<span>{{ block.settings.text }}</span>{%- endif -%}
+          </li>
+        {%- endfor -%}
+      </ul>
+    {%- endif -%}
+
+    {%- if section.settings.footnote != blank -%}
+      <div class="kwad-hero__foot">{{ section.settings.footnote }}</div>
+    {%- endif -%}
+
+  </div>
+</section>
+
+<script src="{{ 'kwadzilla-game.js' | asset_url }}" defer></script>
+
+{% schema %}
+{
+  "name": "Kwadzilla game",
+  "tag": "section",
+  "class": "kwadzilla-section",
+  "settings": [
+    {
+      "type": "header",
+      "content": "Headline"
+    },
+    {
+      "type": "text",
+      "id": "eyebrow",
+      "label": "Eyebrow",
+      "default": "Now playing · Island Sector 1"
+    },
+    {
+      "type": "text",
+      "id": "heading",
+      "label": "Heading",
+      "default": "Kwadzilla"
+    },
+    {
+      "type": "text",
+      "id": "subheading",
+      "label": "Subheading",
+      "default": "The biggest lizard breaks out"
+    },
+    {
+      "type": "richtext",
+      "id": "intro",
+      "label": "Intro copy",
+      "default": "<p>They built the whole island out of concrete and razor wire. They did not plan for something forty feet tall with a bad attitude. Climb the walls, pull the place apart, and get everybody off the rock.</p>"
+    },
+    {
+      "type": "header",
+      "content": "Buttons"
+    },
+    {
+      "type": "text",
+      "id": "cta_1_label",
+      "label": "Primary button label",
+      "default": "Shop the drop"
+    },
+    {
+      "type": "url",
+      "id": "cta_1_link",
+      "label": "Primary button link"
+    },
+    {
+      "type": "text",
+      "id": "cta_2_label",
+      "label": "Secondary button label",
+      "default": "Read the story"
+    },
+    {
+      "type": "url",
+      "id": "cta_2_link",
+      "label": "Secondary button link"
+    },
+    {
+      "type": "header",
+      "content": "Reward",
+      "info": "Create the matching discount code in Discounts before you turn this on."
+    },
+    {
+      "type": "text",
+      "id": "reward_code",
+      "label": "Discount code to reveal",
+      "info": "Leave blank to disable the reward entirely."
+    },
+    {
+      "type": "text",
+      "id": "reward_label",
+      "label": "Reward headline",
+      "default": "Sector cleared — take 15% off"
+    },
+    {
+      "type": "text",
+      "id": "reward_note",
+      "label": "Reward small print",
+      "default": "One use per customer. Applies at checkout."
+    },
+    {
+      "type": "number",
+      "id": "reward_score",
+      "label": "Score needed to unlock",
+      "default": 20000
+    },
+    {
+      "type": "header",
+      "content": "Appearance"
+    },
+    {
+      "type": "color",
+      "id": "color_accent",
+      "label": "Accent",
+      "default": "#6ef2a0"
+    },
+    {
+      "type": "color",
+      "id": "color_secondary",
+      "label": "Secondary accent",
+      "default": "#ff3d7f"
+    },
+    {
+      "type": "color",
+      "id": "color_bg",
+      "label": "Background top",
+      "default": "#070a18"
+    },
+    {
+      "type": "color",
+      "id": "color_bg_2",
+      "label": "Background bottom",
+      "default": "#150e2e"
+    },
+    {
+      "type": "checkbox",
+      "id": "sound_on",
+      "label": "Sound on by default",
+      "info": "Audio only ever starts after the visitor interacts with the page.",
+      "default": true
+    },
+    {
+      "type": "header",
+      "content": "Footnote"
+    },
+    {
+      "type": "richtext",
+      "id": "footnote",
+      "label": "Footnote",
+      "default": "<p>Kwadzilla is a work of arcade fiction. Every facility, tower and logo in the game is invented for the game. No real place, company or person is depicted.</p>"
+    }
+  ],
+  "blocks": [
+    {
+      "type": "fact",
+      "name": "Feature",
+      "limit": 6,
+      "settings": [
+        {
+          "type": "text",
+          "id": "title",
+          "label": "Title",
+          "default": "Rampage, but righteous"
+        },
+        {
+          "type": "richtext",
+          "id": "text",
+          "label": "Text",
+          "default": "<p>Every barred window you break lets somebody walk out. The score that matters is the one marked FREED.</p>"
+        }
+      ]
+    }
+  ],
+  "presets": [
+    {
+      "name": "Kwadzilla game",
+      "blocks": [
+        { "type": "fact" },
+        { "type": "fact" },
+        { "type": "fact" }
+      ]
+    }
+  ]
+}
+{% endschema %}

@@ -1,0 +1,586 @@
+/*!
+ * KWADZILLA — THE BIGGEST LIZARD BREAKS OUT
+ * Splash page + arcade cabinet styles. Scoped under .kwad-hero / .kwad-game
+ * so it can be dropped into any Shopify theme without leaking.
+ */
+
+.kwad-hero {
+  --kwad-bg: #070a18;
+  --kwad-bg-2: #150e2e;
+  --kwad-ink: #eaf2ff;
+  --kwad-dim: #93a3c4;
+  --kwad-acid: #6ef2a0;
+  --kwad-hot: #ff3d7f;
+  --kwad-gold: #ffd23f;
+  --kwad-cyan: #59e6ff;
+  --kwad-edge: rgba(110, 242, 160, 0.28);
+  --kwad-mono: ui-monospace, "SFMono-Regular", "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  padding: clamp(2rem, 6vw, 4.5rem) clamp(1rem, 4vw, 3rem) clamp(2.5rem, 6vw, 4rem);
+  background:
+    radial-gradient(120% 80% at 50% 0%, #3a1552 0%, rgba(58, 21, 82, 0) 60%),
+    radial-gradient(90% 60% at 80% 100%, #0d2b44 0%, rgba(13, 43, 68, 0) 65%),
+    linear-gradient(180deg, var(--kwad-bg) 0%, var(--kwad-bg-2) 55%, #090c1c 100%);
+  color: var(--kwad-ink);
+  font-family: var(--kwad-mono);
+  text-align: center;
+}
+
+/* Horizon glow + starfield, pure CSS so there are no image requests. */
+.kwad-hero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background-image:
+    radial-gradient(1px 1px at 12% 18%, rgba(255, 255, 255, 0.7) 50%, transparent 51%),
+    radial-gradient(1px 1px at 28% 9%, rgba(255, 255, 255, 0.5) 50%, transparent 51%),
+    radial-gradient(1px 1px at 44% 24%, rgba(255, 255, 255, 0.6) 50%, transparent 51%),
+    radial-gradient(1px 1px at 62% 12%, rgba(255, 255, 255, 0.45) 50%, transparent 51%),
+    radial-gradient(1px 1px at 78% 22%, rgba(255, 255, 255, 0.65) 50%, transparent 51%),
+    radial-gradient(1px 1px at 91% 8%, rgba(255, 255, 255, 0.5) 50%, transparent 51%),
+    radial-gradient(1px 1px at 7% 42%, rgba(255, 255, 255, 0.4) 50%, transparent 51%),
+    radial-gradient(1px 1px at 84% 46%, rgba(255, 255, 255, 0.35) 50%, transparent 51%);
+  opacity: 0.9;
+}
+
+.kwad-hero__inner {
+  position: relative;
+  max-width: 1080px;
+  margin: 0 auto;
+}
+
+/* ------------------------------------------------------------------ */
+/* Headline                                                            */
+/* ------------------------------------------------------------------ */
+
+.kwad-hero__eyebrow {
+  margin: 0 0 1rem;
+  font-size: clamp(0.62rem, 1.6vw, 0.75rem);
+  letter-spacing: 0.42em;
+  text-transform: uppercase;
+  color: var(--kwad-acid);
+}
+
+.kwad-hero__eyebrow span {
+  display: inline-block;
+  padding: 0.45em 0.9em;
+  border: 1px solid var(--kwad-edge);
+  border-radius: 999px;
+  background: rgba(110, 242, 160, 0.07);
+}
+
+.kwad-hero__title {
+  margin: 0;
+  font-size: clamp(2.6rem, 11vw, 6.5rem);
+  line-height: 0.86;
+  font-weight: 900;
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
+  font-family: Impact, "Haettenschweiler", "Arial Narrow Bold", "Anton", var(--kwad-mono);
+  color: var(--kwad-acid);
+  text-shadow:
+    3px 0 0 var(--kwad-hot),
+    -3px 0 0 var(--kwad-cyan),
+    0 0 34px rgba(110, 242, 160, 0.45);
+}
+
+.kwad-hero__title small {
+  display: block;
+  margin-top: 0.6rem;
+  font-family: var(--kwad-mono);
+  font-size: clamp(0.7rem, 2.6vw, 1.05rem);
+  font-weight: 700;
+  letter-spacing: 0.28em;
+  color: var(--kwad-ink);
+  text-shadow: none;
+}
+
+.kwad-hero__sub {
+  max-width: 46ch;
+  margin: 1.25rem auto 0;
+  font-size: clamp(0.85rem, 2.2vw, 1rem);
+  line-height: 1.65;
+  color: var(--kwad-dim);
+}
+
+/* ------------------------------------------------------------------ */
+/* Cabinet                                                             */
+/* ------------------------------------------------------------------ */
+
+.kwad-game {
+  margin: clamp(1.75rem, 5vw, 2.75rem) auto 0;
+  max-width: 940px;
+}
+
+.kwad-cab {
+  padding: clamp(0.6rem, 2vw, 1rem);
+  border-radius: 18px;
+  background: linear-gradient(180deg, #1d1436 0%, #120c24 100%);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.6),
+    0 30px 70px -30px rgba(0, 0, 0, 0.95),
+    0 0 90px -30px rgba(110, 242, 160, 0.35);
+}
+
+.kwad-screen {
+  position: relative;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #04060f;
+  box-shadow: inset 0 0 0 2px rgba(0, 0, 0, 0.8), inset 0 0 60px rgba(0, 0, 0, 0.8);
+}
+
+.kwad-canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 9;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  outline: none;
+  touch-action: manipulation;
+}
+
+.kwad-canvas:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--kwad-acid);
+}
+
+.kwad-scan {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    repeating-linear-gradient(
+      180deg,
+      rgba(0, 0, 0, 0.24) 0px,
+      rgba(0, 0, 0, 0.24) 1px,
+      rgba(0, 0, 0, 0) 1px,
+      rgba(0, 0, 0, 0) 3px
+    );
+  mix-blend-mode: multiply;
+  opacity: 0.55;
+}
+
+/* ------------------------------------------------------------------ */
+/* Overlay panels (start / how to play / pause / game over)            */
+/* ------------------------------------------------------------------ */
+
+.kwad-ui {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: radial-gradient(70% 70% at 50% 45%, rgba(6, 10, 24, 0.86) 0%, rgba(4, 6, 15, 0.4) 100%);
+}
+
+.kwad-ui[hidden] { display: none; }
+
+.kwad-panel {
+  width: min(100%, 460px);
+  text-align: center;
+}
+
+.kwad-kicker {
+  margin: 0 0 0.5rem;
+  font-size: 0.6rem;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--kwad-gold);
+}
+
+.kwad-logo {
+  margin: 0;
+  font-size: clamp(1.6rem, 6vw, 2.6rem);
+  line-height: 1;
+  font-weight: 900;
+  letter-spacing: 0.02em;
+  font-family: Impact, "Haettenschweiler", "Arial Narrow Bold", var(--kwad-mono);
+  color: var(--kwad-acid);
+  text-shadow: 2px 0 0 var(--kwad-hot), -2px 0 0 var(--kwad-cyan);
+}
+
+.kwad-tag {
+  margin: 0.4rem 0 0;
+  font-size: clamp(0.6rem, 2.4vw, 0.78rem);
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--kwad-dim);
+}
+
+.kwad-h {
+  margin: 0 0 0.85rem;
+  font-size: clamp(1.1rem, 4.5vw, 1.6rem);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--kwad-acid);
+}
+
+.kwad-h--red { color: var(--kwad-hot); }
+
+.kwad-list {
+  margin: 0 0 0.9rem;
+  padding: 0;
+  list-style: none;
+  text-align: left;
+  font-size: clamp(0.66rem, 2.4vw, 0.8rem);
+  line-height: 1.9;
+  color: var(--kwad-ink);
+}
+
+.kwad-list b { color: var(--kwad-gold); }
+
+.kwad-note {
+  margin: 0 0 1rem;
+  font-size: clamp(0.64rem, 2.2vw, 0.76rem);
+  line-height: 1.7;
+  color: var(--kwad-dim);
+}
+
+.kwad-note b { color: var(--kwad-gold); }
+
+.kwad-meta {
+  margin: 0.9rem 0 0;
+  font-size: 0.66rem;
+  letter-spacing: 0.2em;
+  color: var(--kwad-dim);
+}
+
+.kwad-stats {
+  display: flex;
+  justify-content: center;
+  gap: clamp(0.8rem, 4vw, 2rem);
+  margin: 0 0 1.1rem;
+}
+
+.kwad-stats div { margin: 0; }
+
+.kwad-stats dt {
+  font-size: 0.58rem;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--kwad-dim);
+}
+
+.kwad-stats dd {
+  margin: 0.25rem 0 0;
+  font-size: clamp(0.9rem, 3.6vw, 1.3rem);
+  font-weight: 700;
+  color: var(--kwad-gold);
+}
+
+.kwad-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.6rem;
+  margin-top: 1rem;
+}
+
+/* ------------------------------------------------------------------ */
+/* Buttons                                                             */
+/* ------------------------------------------------------------------ */
+
+.kwad-btn {
+  display: inline-block;
+  padding: 0.75em 1.5em;
+  border: 2px solid var(--kwad-acid);
+  border-radius: 4px;
+  background: var(--kwad-acid);
+  color: #07110b;
+  font-family: inherit;
+  font-size: clamp(0.66rem, 2.4vw, 0.78rem);
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  text-decoration: none;
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, background-color 0.12s ease;
+}
+
+.kwad-btn:hover,
+.kwad-btn:focus-visible {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 0 -2px rgba(110, 242, 160, 0.35), 0 0 26px rgba(110, 242, 160, 0.5);
+}
+
+.kwad-btn:active { transform: translateY(0); }
+
+.kwad-btn--ghost {
+  background: transparent;
+  color: var(--kwad-acid);
+}
+
+.kwad-btn--ghost:hover,
+.kwad-btn--ghost:focus-visible {
+  background: rgba(110, 242, 160, 0.12);
+}
+
+.kwad-hero__cta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.7rem;
+  margin-top: clamp(1.5rem, 4vw, 2.25rem);
+}
+
+.kwad-hero__cta .kwad-btn { padding: 0.95em 1.9em; }
+
+/* ------------------------------------------------------------------ */
+/* Reward reveal                                                       */
+/* ------------------------------------------------------------------ */
+
+.kwad-reward {
+  margin: 0 0 0.6rem;
+  padding: 0.9rem;
+  border: 1px dashed var(--kwad-gold);
+  border-radius: 8px;
+  background: rgba(255, 210, 63, 0.08);
+}
+
+.kwad-reward__label {
+  margin: 0 0 0.55rem;
+  font-size: 0.62rem;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--kwad-gold);
+}
+
+.kwad-reward__note {
+  margin: 0.55rem 0 0;
+  font-size: 0.62rem;
+  line-height: 1.6;
+  color: var(--kwad-dim);
+}
+
+.kwad-code {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.55em 0.9em;
+  border: 2px solid var(--kwad-gold);
+  border-radius: 4px;
+  background: #0b0d1c;
+  color: var(--kwad-gold);
+  font-family: inherit;
+  font-size: clamp(0.8rem, 3.2vw, 1.05rem);
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  cursor: pointer;
+}
+
+.kwad-code em {
+  font-style: normal;
+  font-size: 0.58rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--kwad-dim);
+}
+
+.kwad-code:hover { background: #141731; }
+
+/* ------------------------------------------------------------------ */
+/* Control bar                                                         */
+/* ------------------------------------------------------------------ */
+
+.kwad-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.7rem 0.3rem 0.15rem;
+  flex-wrap: wrap;
+}
+
+.kwad-chip {
+  padding: 0.45em 0.8em;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--kwad-ink);
+  font-family: inherit;
+  font-size: 0.6rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.kwad-chip:hover { background: rgba(255, 255, 255, 0.12); }
+.kwad-chip.is-off { color: var(--kwad-dim); opacity: 0.7; }
+
+.kwad-hint {
+  margin: 0 0 0 auto;
+  font-size: 0.6rem;
+  letter-spacing: 0.06em;
+  color: var(--kwad-dim);
+}
+
+.kwad-hint kbd {
+  display: inline-block;
+  min-width: 1.5em;
+  padding: 0.1em 0.35em;
+  margin: 0 0.1em;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-bottom-width: 2px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.06);
+  font-family: inherit;
+  font-size: 0.9em;
+  color: var(--kwad-ink);
+}
+
+/* ------------------------------------------------------------------ */
+/* Touch controls                                                      */
+/* ------------------------------------------------------------------ */
+
+.kwad-touch {
+  display: none;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 0.65rem;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.kwad-game.is-touch .kwad-touch { display: flex; }
+.kwad-game.is-touch .kwad-hint { display: none; }
+
+.kwad-dpad {
+  position: relative;
+  width: 132px;
+  height: 132px;
+  flex: none;
+}
+
+.kwad-key {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(110, 242, 160, 0.4);
+  border-radius: 8px;
+  background: rgba(110, 242, 160, 0.1);
+  color: var(--kwad-acid);
+  font-family: inherit;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  touch-action: none;
+  cursor: pointer;
+}
+
+.kwad-key.is-down {
+  background: rgba(110, 242, 160, 0.45);
+  color: #07110b;
+}
+
+.kwad-key--u { top: 0; left: 44px; width: 44px; height: 44px; }
+.kwad-key--l { top: 44px; left: 0; width: 44px; height: 44px; }
+.kwad-key--r { top: 44px; left: 88px; width: 44px; height: 44px; }
+.kwad-key--d { top: 88px; left: 44px; width: 44px; height: 44px; }
+
+.kwad-acts {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+}
+
+.kwad-acts .kwad-key {
+  position: static;
+  padding: 0 0.9rem;
+  height: 52px;
+  min-width: 62px;
+}
+
+.kwad-key--hit {
+  height: 64px;
+  min-width: 84px;
+  border-color: var(--kwad-hot);
+  background: rgba(255, 61, 127, 0.16);
+  color: var(--kwad-hot);
+  font-size: 0.8rem;
+}
+
+.kwad-key--hit.is-down { background: rgba(255, 61, 127, 0.5); color: #170208; }
+
+.kwad-key--rage {
+  border-color: var(--kwad-gold);
+  background: rgba(255, 210, 63, 0.14);
+  color: var(--kwad-gold);
+}
+
+.kwad-key--rage.is-down { background: rgba(255, 210, 63, 0.5); color: #171003; }
+
+/* ------------------------------------------------------------------ */
+/* Feature strip + footnote                                            */
+/* ------------------------------------------------------------------ */
+
+.kwad-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 0.9rem;
+  margin: clamp(2rem, 5vw, 3rem) auto 0;
+  padding: 0;
+  list-style: none;
+  max-width: 940px;
+  text-align: left;
+}
+
+.kwad-facts li {
+  padding: 1rem 1.1rem;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.kwad-facts b {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.66rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--kwad-acid);
+}
+
+.kwad-facts span {
+  font-size: 0.72rem;
+  line-height: 1.7;
+  color: var(--kwad-dim);
+}
+
+.kwad-hero__foot {
+  max-width: 62ch;
+  margin: clamp(1.75rem, 4vw, 2.5rem) auto 0;
+  font-size: 0.64rem;
+  line-height: 1.8;
+  color: rgba(147, 163, 196, 0.75);
+}
+
+/* ------------------------------------------------------------------ */
+/* Motion / small screens                                              */
+/* ------------------------------------------------------------------ */
+
+@media (max-width: 600px) {
+  .kwad-bar { justify-content: center; }
+  .kwad-hint { margin: 0.35rem 0 0; width: 100%; text-align: center; }
+  .kwad-touch { flex-direction: row; }
+  .kwad-dpad { width: 114px; height: 114px; }
+  .kwad-key--u { left: 38px; width: 38px; height: 38px; }
+  .kwad-key--l { top: 38px; width: 38px; height: 38px; }
+  .kwad-key--r { top: 38px; left: 76px; width: 38px; height: 38px; }
+  .kwad-key--d { top: 76px; left: 38px; width: 38px; height: 38px; }
+  .kwad-acts { flex-direction: column-reverse; align-items: stretch; }
+  .kwad-acts .kwad-key { height: 44px; }
+  .kwad-key--hit { height: 52px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kwad-btn { transition: none; }
+  .kwad-btn:hover, .kwad-btn:focus-visible { transform: none; }
+  .kwad-scan { opacity: 0.25; }
+}

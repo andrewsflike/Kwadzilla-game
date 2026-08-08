@@ -1,0 +1,49 @@
+{
+  "sections": {
+    "kwadzilla": {
+      "type": "kwadzilla-game",
+      "blocks": {
+        "fact-1": {
+          "type": "fact",
+          "settings": {
+            "title": "Rampage, but righteous",
+            "text": "<p>Every barred window you break lets somebody walk out. The score that matters is the one marked FREED.</p>"
+          }
+        },
+        "fact-2": {
+          "type": "fact",
+          "settings": {
+            "title": "Ten storeys of concrete",
+            "text": "<p>Facilities crumble floor by floor. Knock the supports out and the whole structure comes down on itself.</p>"
+          }
+        },
+        "fact-3": {
+          "type": "fact",
+          "settings": {
+            "title": "Fill the meter, breathe fire",
+            "text": "<p>Smashing builds RAGE. Cash it in for a few seconds of invulnerable, fire-breathing demolition.</p>"
+          }
+        }
+      },
+      "block_order": ["fact-1", "fact-2", "fact-3"],
+      "settings": {
+        "eyebrow": "Now playing · Island Sector 1",
+        "heading": "Kwadzilla",
+        "subheading": "The biggest lizard breaks out",
+        "intro": "<p>They built the whole island out of concrete and razor wire. They did not plan for something forty feet tall with a bad attitude. Climb the walls, pull the place apart, and get everybody off the rock.</p>",
+        "cta_1_label": "Shop the drop",
+        "cta_2_label": "Read the story",
+        "reward_label": "Sector cleared — take 15% off",
+        "reward_note": "One use per customer. Applies at checkout.",
+        "reward_score": 20000,
+        "color_accent": "#6ef2a0",
+        "color_secondary": "#ff3d7f",
+        "color_bg": "#070a18",
+        "color_bg_2": "#150e2e",
+        "sound_on": true,
+        "footnote": "<p>Kwadzilla is a work of arcade fiction. Every facility, tower and logo in the game is invented for the game. No real place, company or person is depicted.</p>"
+      }
+    }
+  },
+  "order": ["kwadzilla"]
+}
