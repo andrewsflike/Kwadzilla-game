@@ -28,6 +28,7 @@
   var SURF_Y = 244;      // foreground water
   var HUD_Y = 250;       // bottom HUD band
   var MAX_ROWS = 24;     // tallest a facility may get without clipping the HUD
+  var JUMP_V = -6.5;     // launch speed of a full-height jump
   var MAX_PARTICLES = 420;
   var STORE_KEY = 'kwadzilla.v1';
   var STEP = 1000 / 60;
@@ -511,6 +512,7 @@
       mode: 'ground',           // ground | air | climb
       climb: null,
       walk: 0, atk: 0, atkCool: 0,
+      jumps: 2, launch: 0,
       hp: 100, maxHp: 100, inv: 0,
       rage: 0, rageT: 0,
       alive: true, roarT: 0
@@ -596,6 +598,7 @@
       camX = 0;
       P.x = 50; P.y = GROUND; P.vx = 0; P.vy = 0; P.mode = 'ground'; P.climb = null;
       P.hp = P.maxHp; P.inv = 90; P.atk = 0; P.rage = 0; P.rageT = 0; P.alive = true;
+      P.jumps = 2; P.launch = 0;
       liberated = 0;
 
       // Turrets on top of watchtowers.
@@ -826,14 +829,16 @@
       var side = P.x < camX + VW / 2 ? 1 : -1;
       var ex = side > 0 ? camX + VW + 24 : camX - 24;
       if (kind === 'chopper') {
-        foes.push({ type: 'chopper', x: ex, y: rnd(70, 130), w: 26, h: 12, hp: 3, vx: 0, vy: 0, t: 0, fire: irnd(40, 100), rot: 0 });
+        foes.push({ type: 'chopper', x: ex, y: rnd(56, 110), w: 26, h: 12, hp: 2,
+          vx: 0, vy: 0, t: 0, fire: irnd(70, 140), aim: 0, rot: 0 });
       } else if (kind === 'van') {
         foes.push({ type: 'van', x: ex, y: GROUND, w: 28, h: 15, hp: 4, vx: 0, vy: 0, t: 0, fire: irnd(50, 110) });
       } else if (kind === 'jet') {
         var d = side > 0 ? -1 : 1;
         foes.push({ type: 'jet', x: ex, y: rnd(40, 80), w: 30, h: 9, hp: 2, vx: d * 3.1, vy: 0, t: 0, fire: 30 });
       } else if (kind === 'gunship') {
-        foes.push({ type: 'gunship', x: ex, y: 64, w: 46, h: 20, hp: 26, vx: 0, vy: 0, t: 0, fire: 90, burst: 0, boss: true });
+        foes.push({ type: 'gunship', x: ex, y: 64, w: 46, h: 20, hp: 20,
+          vx: 0, vy: 0, t: 0, fire: 110, aim: 0, burst: 0, boss: true });
         banner = 'WARDEN GUNSHIP INBOUND';
         bannerT = 150;
         audio.levelUp();
@@ -854,7 +859,7 @@
       for (var i = 0; i < buildings.length; i++) {
         var b = buildings[i];
         if (b.state !== 'alive') continue;
-        if (x >= b.x - 6 && x <= b.x + b.w + 6) return b;
+        if (x >= b.x - 10 && x <= b.x + b.w + 10) return b;
       }
       return null;
     }
@@ -862,19 +867,19 @@
     function updatePlayer() {
       if (!P.alive) return;
 
-      var speed = P.rageT > 0 ? 2.1 : 1.6;
+      var speed = P.rageT > 0 ? 2.7 : 2.0;
       var wantL = K.left, wantR = K.right;
 
       if (P.mode === 'climb') {
         var b = P.climb;
         if (!b || b.state !== 'alive') { P.mode = 'air'; P.climb = null; P.vy = 0; }
         else {
-          var cs = 1.35;
+          var cs = P.rageT > 0 ? 2.4 : 1.9;
           if (K.up) P.y -= cs;
           if (K.down) P.y += cs;
-          if (wantL) { P.facing = -1; P.x -= 0.45; }
-          if (wantR) { P.facing = 1; P.x += 0.45; }
-          P.walk += 0.14;
+          if (wantL) { P.facing = -1; P.x -= 0.9; }
+          if (wantR) { P.facing = 1; P.x += 0.9; }
+          P.walk += 0.19;
 
           var ty = topOf(b);
           if (P.y <= ty) {           // over the parapet — stand on the roof
@@ -885,12 +890,26 @@
           // stepped off the side of the tower
           if (P.x < b.x - 14 || P.x > b.x + b.w + 14) { P.mode = 'air'; P.climb = null; P.vy = 0; }
 
-          if (consume('jump')) { P.mode = 'air'; P.climb = null; P.vy = -4.4; audio.jump(); }
+          // Kick off the wall: away from the building, with height.
+          if (consume('jump')) {
+            var away = (P.x < b.x + b.w / 2) ? -1 : 1;
+            P.mode = 'air'; P.climb = null;
+            P.vy = -5.6; P.vx = away * 3.4; P.facing = away;
+            P.launch = 11;
+            P.jumps = 1;          // still one mid-air jump left
+            audio.jump();
+            spark(P.x - away * 8, P.y - 24, '#cfe9ff', 5);
+          }
         }
       }
 
       if (P.mode === 'ground' || P.mode === 'air') {
-        if (wantL) { P.vx = -speed; P.facing = -1; }
+        if (P.launch > 0) {
+          // Preserve the wall kick for a few frames so it actually reads.
+          P.launch--;
+          P.vx *= 0.96;
+          if (wantL) P.facing = -1; else if (wantR) P.facing = 1;
+        } else if (wantL) { P.vx = -speed; P.facing = -1; }
         else if (wantR) { P.vx = speed; P.facing = 1; }
         else P.vx *= 0.6;
 
@@ -898,6 +917,7 @@
         if (Math.abs(P.vx) > 0.2 && P.mode === 'ground') P.walk += Math.abs(P.vx) * 0.14;
 
         if (P.mode === 'ground') {
+          P.jumps = 2;            // refilled on any solid footing
           // You can only grab a wall from the street. On a roof, up means jump.
           var onStreet = P.y >= GROUND - 2;
           var bb = onStreet ? buildingAt(P.x) : null;
@@ -905,15 +925,25 @@
             P.mode = 'climb'; P.climb = bb; P.y = GROUND - 4;
             consume('up');
           } else if (consume('jump') || consume('up')) {
-            P.vy = -5.6; P.mode = 'air'; audio.jump();
+            P.jumps--; P.vy = JUMP_V; P.mode = 'air'; audio.jump();
           }
         } else {
-          P.vy += 0.34;
+          // Cutting the jump short gives fine control over height.
+          if (P.vy < -1.4 && !K.jump && !K.up) P.vy *= 0.82;
+          P.vy += P.vy < 0 ? 0.30 : 0.44;
           P.y += P.vy;
-          // grab a building face mid-air
-          if (K.up) {
-            var b2 = buildingAt(P.x);
-            if (b2 && P.y > topOf(b2) + 4) { P.mode = 'climb'; P.climb = b2; P.vy = 0; }
+
+          // Grabbing a wall wins over spending the mid-air jump.
+          var b2 = buildingAt(P.x);
+          if (K.up && b2 && P.y > topOf(b2) + 4) {
+            P.mode = 'climb'; P.climb = b2; P.vy = 0; P.launch = 0;
+            consume('up'); consume('jump');
+          } else if ((consume('jump') || consume('up')) && P.jumps > 0) {
+            P.jumps--;
+            P.vy = JUMP_V * 0.9;
+            P.launch = 0;
+            audio.jump();
+            for (var dj = 0; dj < 6; dj++) spark(P.x + rnd(-9, 9), P.y - 2, '#bff0d0', 1);
           }
         }
       }
@@ -1061,30 +1091,43 @@
         if (f.type === 'chopper' || f.type === 'gunship') {
           var boss = f.type === 'gunship';
           var tx = P.x + (boss ? 0 : Math.sin(f.t * 0.02) * 60);
-          var ty = boss ? 60 + Math.sin(f.t * 0.02) * 14 : clamp(P.y - 70, 44, 150) + Math.sin(f.t * 0.05) * 8;
+          // Choppers stand off well above head height, so they no longer
+          // park themselves on top of you.
+          var ty = boss ? 60 + Math.sin(f.t * 0.02) * 14
+                        : clamp(P.y - 96, 40, 132) + Math.sin(f.t * 0.05) * 8;
           f.vx += clamp((tx - f.x) * 0.0035, -0.09, 0.09);
           f.vy += clamp((ty - f.y) * 0.006, -0.12, 0.12);
           f.vx *= 0.965; f.vy *= 0.93;
           f.x += f.vx; f.y += f.vy;
           f.rot = (f.rot || 0) + 0.6;
 
+          // Every shot is telegraphed first: the gun light blinks and a tracer
+          // line paints the target, giving you time to move.
           f.fire--;
-          if (f.fire <= 0 && Math.abs(f.x - P.x) < (boss ? 260 : 150)) {
-            if (boss) {
-              f.burst = 3;
-              f.fire = 130;
-            } else {
-              shoot(f.x, f.y + 6, P.x, P.y - 24, 2.3);
-              f.fire = 100 + irnd(0, 50);
+          if (f.fire <= 0 && f.aim <= 0 && Math.abs(f.x - P.x) < (boss ? 260 : 150)) {
+            f.aim = boss ? 44 : 38;
+          }
+          if (f.aim > 0) {
+            f.aim--;
+            if (f.aim === 0) {
+              if (boss) {
+                f.burst = 3;
+                f.fire = 170;
+              } else {
+                shoot(f.x, f.y + 6, P.x, P.y - 24, 1.75);
+                f.fire = 170 + irnd(0, 80);
+              }
             }
           }
-          if (f.burst > 0 && f.t % 10 === 0) {
-            shoot(f.x + rnd(-14, 14), f.y + 10, P.x + rnd(-20, 20), P.y - 20, 2.6, 'shell');
+          if (f.burst > 0 && f.t % 12 === 0) {
+            shoot(f.x + rnd(-14, 14), f.y + 10, P.x + rnd(-20, 20), P.y - 20, 2.15, 'shell');
             f.burst--;
           }
 
-          // rotor wash hurts if you're right underneath it
-          if (hit(f.x - f.w / 2, f.y - f.h / 2, f.w, f.h, P.x - 15, P.y - 46, 30, 46)) damagePlayer(boss ? 14 : 8);
+          // rotor wash, only if you jump right into it
+          if (hit(f.x - f.w / 2, f.y - f.h / 2, f.w, f.h, P.x - 15, P.y - 46, 30, 46)) {
+            damagePlayer(boss ? 10 : 5);
+          }
 
         } else if (f.type === 'van') {
           var dx = P.x - f.x;
@@ -1238,7 +1281,7 @@
           P.alive = true; P.hp = P.maxHp; P.inv = 110;
           P.x = clamp(camX + VW / 2, 20, worldW - 20);
           P.y = GROUND - 40; P.vy = 0; P.mode = 'air'; P.climb = null;
-          P.rage = 0; P.rageT = 0;
+          P.rage = 0; P.rageT = 0; P.jumps = 2; P.launch = 0;
           state = 'play';
         }
       } else if (state === 'attract' || state === 'over') {
@@ -1718,15 +1761,41 @@
           var rw = Math.abs(Math.cos(f.rot || 0)) * (big ? 34 : 22) + 4;
           g.fillRect(x - rw, y - h / 2 - 3, rw * 2, 1);
           g.fillRect(x - 1, y - h / 2 - 3, 2, 4);
-          // belly light
-          g.fillStyle = Math.floor(tick / 12) % 2 ? C.red : '#511';
+          // belly light — blinks fast while it lines up a shot
+          var lining = f.aim > 0;
+          var blink = lining ? Math.floor(f.aim / 4) % 2 === 0 : Math.floor(tick / 12) % 2 === 1;
+          g.fillStyle = blink ? C.red : '#511';
           g.fillRect(x - 2, y + h / 2 - 1, 3, 2);
+
+          // …and paints a dotted tracer at where it is about to fire
+          if (lining) {
+            var px0 = x, py0 = y + h / 2 + 2;
+            var px1 = Math.round(P.x - camX), py1 = Math.round(P.y) - 24;
+            var seg = Math.max(1, Math.round(Math.hypot(px1 - px0, py1 - py0) / 7));
+            g.globalAlpha = 0.55;
+            g.fillStyle = C.red;
+            for (var d = 1; d < seg; d++) {
+              if ((d + Math.floor(tick / 3)) % 2) continue;
+              g.fillRect(
+                Math.round(px0 + (px1 - px0) * (d / seg)),
+                Math.round(py0 + (py1 - py0) * (d / seg)), 2, 2
+              );
+            }
+            g.globalAlpha = 1;
+            if (f.aim < 14 && Math.floor(f.aim / 3) % 2 === 0) {
+              g.fillStyle = C.red;
+              g.fillRect(px1 - 5, py1 - 1, 4, 2);
+              g.fillRect(px1 + 2, py1 - 1, 4, 2);
+              g.fillRect(px1 - 1, py1 - 6, 2, 4);
+              g.fillRect(px1 - 1, py1 + 3, 2, 4);
+            }
+          }
           if (big) {
             g.fillStyle = '#2b3040';
             g.fillRect(x - 16, y + h / 2, 32, 4);
             // boss health pip
             g.fillStyle = '#000'; g.fillRect(x - 20, y - h / 2 - 10, 40, 4);
-            g.fillStyle = C.red; g.fillRect(x - 19, y - h / 2 - 9, 38 * clamp(f.hp / 26, 0, 1), 2);
+            g.fillStyle = C.red; g.fillRect(x - 19, y - h / 2 - 9, 38 * clamp(f.hp / 20, 0, 1), 2);
           }
 
         } else if (f.type === 'van') {
@@ -2021,7 +2090,8 @@
           '<ul class="kwad-list">' +
             '<li><b>&larr; &rarr;</b> stomp along the shoreline</li>' +
             '<li><b>&uarr;</b> climb a wall &middot; <b>&darr;</b> climb down</li>' +
-            '<li><b>Space</b> smash concrete &middot; <b>Z</b> jump</li>' +
+            '<li><b>Space</b> smash concrete &middot; <b>Z</b> jump (again in mid-air for a second one)</li>' +
+            '<li><b>Z</b> on a wall kicks off it &mdash; chain kicks to cross a rooftop</li>' +
             '<li><b>Shift</b> unleash RAGE when the meter fills &mdash; hold <b>Space</b> to breathe fire</li>' +
           '</ul>' +
           '<p class="kwad-note">Every barred window you break frees somebody. Get them off the island, ' +
@@ -2231,7 +2301,7 @@
           phase: state, score: score, best: hiScore, lives: lives,
           level: level + 1, freed: totalLiberated,
           standing: buildings.filter(function (b) { return b.state !== 'rubble'; }).length,
-          hp: P.hp, x: P.x, mode: P.mode
+          hp: P.hp, x: P.x, y: P.y, mode: P.mode
         };
       },
       destroy: function () {
