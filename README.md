@@ -78,6 +78,12 @@ python3 -m http.server 8000
 Fill the RAGE meter by smashing. Cashing it in gives a few seconds of
 invulnerability, and holding smash during it breathes fire.
 
+**Getting around.** Jump height is variable — tap for a hop (~22px), hold for a
+full jump (~67px). A second jump in mid-air takes you to ~120px, two and a half
+times Kwadzilla's own height. Jumping while clinging to a wall kicks off it
+sideways with height to spare, and you keep a mid-air jump afterwards, so you
+can chain kicks between two facilities to gain altitude fast.
+
 ## How the demolition works
 
 Each facility is a grid of 8×8 destructible cells. A punch clears cells inside
@@ -92,6 +98,21 @@ they're clear of the island.
 
 Buildings render into their own offscreen canvas and only re-render when
 damaged, which is what keeps a few thousand cells at a steady 60 fps.
+
+## What's shooting at you
+
+Riot vans, helicopters, rooftop turrets, jets, and a gunship mini-boss that
+shows up once you've flattened half a sector.
+
+Helicopters telegraph every shot: the belly light blinks red and a dotted tracer
+paints the target for about half a second before they fire, so a shot is always
+something you can walk out of. They hold station well above head height rather
+than parking on top of you, leave roughly four seconds between attacks, and go
+down in two punches.
+
+Measured with helicopters as the only threat and a stationary player who never
+dodges, that's 25% less incoming damage per minute than before — and a player
+who actually uses the telegraph gets far more than that.
 
 ## Hooks for analytics
 
@@ -108,7 +129,7 @@ And exposes read-only state:
 
 ```js
 document.querySelector('[data-kwadzilla]').__kwad.getState();
-// { phase, score, best, lives, level, freed, standing, hp, x, mode }
+// { phase, score, best, lives, level, freed, standing, hp, x, y, mode }
 ```
 
 ## Accessibility and performance
