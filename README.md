@@ -26,7 +26,11 @@ templates/page.kwadzilla-horizon.json   page template for the above
 sections/kwadzilla-game.liquid     all-in-one section — Dawn & older OS 2.0
 templates/page.kwadzilla.json      page template for the above
 
-index.html                         standalone preview, same two assets
+assets/kwadzilla-splash.js         the coming-soon splash (WebGL)
+assets/kwadzilla-splash.css        splash styles + no-WebGL fallback
+
+index.html                         the coming-soon splash
+game.html                          standalone game preview
 ```
 
 Copy the two files in `assets/` either way. Then pick the path that matches
@@ -105,8 +109,45 @@ rules), and the toggle is remembered in `localStorage`.
 
 ```bash
 python3 -m http.server 8000
-# open http://localhost:8000/index.html
+# http://localhost:8000/          the coming-soon splash
+# http://localhost:8000/game.html the game
 ```
+
+## The coming-soon splash
+
+While the game is in development, `index.html` is a full-screen teaser and the
+game lives at `game.html`. Nothing on the splash links to the game.
+
+It's one WebGL fullscreen triangle running a single fragment shader:
+
+- **Procedural monitor-lizard hide.** Voronoi bead field with per-scale
+  roughness, analytic normals, two-depth parallax and ocellus rosettes. The key
+  light rides the cursor, so the whole surface shimmers as you move.
+- **Two eyes, dead centre.** Analytic spheres with corneal refraction into the
+  iris plane, procedural iris fibres, a round pupil (monitor lizards have round
+  pupils, not slits), a limbal ring, and a wet catchlight that tracks the light.
+  They track the cursor with real saccades — hold, then jump — plus
+  micro-saccades, idle wander and blinks.
+- **A red smoke wordmark.** The letterforms are hand-authored vector skeletons
+  with per-point width (`GLYPHS` in `kwadzilla-splash.js`), rasterised once into
+  an offscreen canvas that packs coverage, halo and dilation into R, G and B.
+  The shader then domain-warps that texture into drifting smoke and bleeds red
+  light back onto the beads underneath.
+
+On mobile the eyes follow touch immediately. iOS gates the gyroscope behind a
+permission call that only works inside a user gesture, so a small **Tap to let
+it watch you** button appears there; on Android tilt is wired up straight away.
+The grant is remembered in `localStorage`.
+
+Still zero dependencies and zero network requests — no fonts, no images, no
+libraries. If WebGL is missing or JavaScript is off, a pure-CSS lizard with
+cursor-tracking eyes and a glowing wordmark takes over; the words are real DOM
+either way, so screen readers and crawlers always get them.
+
+`prefers-reduced-motion` freezes the smoke, blinks and idle drift but keeps the
+cursor-driven light, parallax and gaze, since those are direct responses to the
+visitor's own input. Render scale drops automatically if frames get expensive,
+and a lost WebGL context is recovered rather than left as a black page.
 
 ## Controls
 
