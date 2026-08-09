@@ -16,23 +16,66 @@ there are no images, fonts, or audio files to host.
 ## Files
 
 ```
-assets/kwadzilla-game.js      the whole game (~87 KB unminified)
-assets/kwadzilla-game.css     splash page + arcade cabinet styles
-sections/kwadzilla-game.liquid   Shopify section, configurable in the theme editor
-templates/page.kwadzilla.json    ready-made page template using that section
-index.html                    standalone preview, uses the same two assets
+assets/kwadzilla-game.js           the whole game (~87 KB unminified)
+assets/kwadzilla-game.css          splash page + arcade cabinet styles
+
+blocks/kwadzilla-game.liquid       theme block — Horizon & other block themes
+sections/kwadzilla-arcade.liquid   theme-block section to compose it in
+templates/page.kwadzilla-horizon.json   page template for the above
+
+sections/kwadzilla-game.liquid     all-in-one section — Dawn & older OS 2.0
+templates/page.kwadzilla.json      page template for the above
+
+index.html                         standalone preview, same two assets
 ```
 
-## Installing on a Shopify theme
+Copy the two files in `assets/` either way. Then pick the path that matches
+your theme — Horizon below, or [Dawn and older](#dawn-and-older-os-20-themes).
 
-1. Copy `assets/kwadzilla-game.js` and `assets/kwadzilla-game.css` into your
-   theme's `assets/` folder.
+## Installing on Horizon
+
+Horizon is built on [theme blocks](https://shopify.dev/docs/storefronts/themes/architecture/blocks/theme-blocks),
+so the game ships as one, and slots in anywhere Horizon accepts blocks.
+
+1. Copy `assets/kwadzilla-game.js` and `assets/kwadzilla-game.css` into
+   `assets/`.
+2. Copy `blocks/kwadzilla-game.liquid` into `blocks/`.
+3. In the theme editor, **Add block → Kwadzilla game** — inside any section
+   that takes theme blocks. Use Horizon's own heading and text blocks around it
+   for the copy.
+
+Optionally also copy `sections/kwadzilla-arcade.liquid` into `sections/` for a
+ready-made arcade-night canvas that accepts any theme or app block, and
+`templates/page.kwadzilla-horizon.json` into `templates/` for a whole page
+wired up already (**Online Store → Pages**, template **kwadzilla-horizon**).
+
+The block's **Backdrop** setting decides how it meets the page:
+
+| Backdrop | Use when |
+| --- | --- |
+| `None` | The surrounding section already has the look you want. |
+| `Arcade night` | You want the cabinet as a self-contained dark panel. |
+| `Theme colour scheme` | You want it to follow one of the theme's schemes. |
+
+On `None` and `Theme colour scheme` the buttons borrow the surrounding text
+colour, so they stay readable on a light scheme.
+
+You can place more than one on a page; each instance runs independently.
+
+## Dawn and older OS 2.0 themes
+
+Themes without theme blocks use the all-in-one section instead, which carries
+the headline, copy, feature grid and footnote itself.
+
+1. Copy the two files in `assets/` as above.
 2. Copy `sections/kwadzilla-game.liquid` into `sections/`.
 3. Either:
    - **Page template** — copy `templates/page.kwadzilla.json` into `templates/`,
      create a page in **Online Store → Pages**, and pick the **kwadzilla**
      template; or
    - **Any page** — in the theme editor, **Add section → Kwadzilla game**.
+
+## Either way
 
 With the Shopify CLI:
 
@@ -41,11 +84,12 @@ shopify theme dev      # preview locally
 shopify theme push     # publish to the store
 ```
 
-### Section settings
+### Settings
 
-Everything on the page is editable in the theme editor without touching code:
-eyebrow, heading, subheading, intro copy, two CTA buttons, accent and background
-colours, the footnote, and up to six "feature" blocks.
+Everything is editable in the theme editor without touching code. The block
+exposes layout, buttons, reward, accent colours and sound; the all-in-one
+section adds eyebrow, heading, subheading, intro copy, the footnote, and up to
+six "feature" blocks.
 
 **Reward:** set a discount code and a score threshold. Clear the threshold and
 the game-over screen reveals the code with a copy button; miss it and it shows
