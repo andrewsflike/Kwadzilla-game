@@ -35,13 +35,17 @@
   // original procedural pose function's local origin (0,0) used to be.
   // Computed once from each PNG's actual opaque bounding box, not guessed.
   var KWAD_META = {
-    idle:      { w: 96, h: 80, ax: 44.0, ay: 79 },
-    walk_a:    { w: 96, h: 80, ax: 45.0, ay: 79 },
-    walk_b:    { w: 96, h: 80, ax: 47.5, ay: 79 },
-    punch:     { w: 96, h: 80, ax: 47.5, ay: 79 },
-    climb_a:   { w: 96, h: 80, ax: 46.0, ay: 79 },
-    climb_b:   { w: 96, h: 80, ax: 50.5, ay: 79 },
-    roar:      { w: 96, h: 80, ax: 47.0, ay: 79 },
+    // idle/punch/climb_a/climb_b are the newer 400x400 AI-detailed art;
+    // anchors are bbox-scaled to a 78px reference height, same formula as
+    // punch_l etc. below. walk_a/walk_b/roar are still native-resolution
+    // art, anchored directly off their own bbox.
+    idle:      { w: 109.9, h: 109.9, ax: 54.9, ay: 93.9 },
+    walk_a:    { w: 96, h: 80, ax: 44.5, ay: 80 },
+    walk_b:    { w: 80, h: 80, ax: 39.0, ay: 79 },
+    punch:     { w: 106.8, h: 106.8, ax: 57.2, ay: 91.9 },
+    climb_a:   { w: 93.7, h: 93.7, ax: 46.8, ay: 85.7 },
+    climb_b:   { w: 95.7, h: 95.7, ax: 46.9, ay: 84.7 },
+    roar:      { w: 80, h: 80, ax: 41.5, ay: 79 },
     // Scaled/anchored from each source PNG's own bounding box so the
     // character reads at the same size as punch.png — see the comment on
     // pickKwadFrame for how these map to real game moves.
