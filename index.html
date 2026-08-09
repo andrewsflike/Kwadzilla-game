@@ -3,84 +3,46 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Kwadzilla — The Biggest Lizard Breaks Out</title>
-<meta name="description" content="Play Kwadzilla: the biggest lizard breaks out. A retro arcade splash page where a giant lizard levels the prison island and frees everybody inside.">
-<meta name="theme-color" content="#070a18">
+<title>2072 — Soundboy Kwad</title>
+<meta name="description" content="2072. Soundboy Kwad. Something very large is waking up.">
+<meta name="theme-color" content="#0a0c08">
 
 <!-- Social preview (swap the image URL for your own once hosted) -->
-<meta property="og:title" content="Kwadzilla — The Biggest Lizard Breaks Out">
-<meta property="og:description" content="Climb it. Smash it. Free everybody. A playable arcade splash page.">
+<meta property="og:title" content="2072 — Soundboy Kwad">
+<meta property="og:description" content="Something very large is waking up.">
 <meta property="og:type" content="website">
 
-<link rel="stylesheet" href="./assets/kwadzilla-game.css">
+<link rel="stylesheet" href="./assets/kwadzilla-splash.css">
 <style>
-  html, body { margin: 0; padding: 0; background: #070a18; }
-  body { -webkit-font-smoothing: antialiased; }
+  html, body { margin: 0; padding: 0; height: 100%; background: #0a0c08; }
+  body { -webkit-font-smoothing: antialiased; overflow: hidden; }
 </style>
 </head>
 <body>
 
-<section class="kwad-hero">
-  <div class="kwad-hero__inner">
+<!--
+  The WebGL canvas is injected by the script, so a visitor with JavaScript
+  off never sees an empty black box. Everything below is the real content:
+  it stays in the accessibility tree at all times, and becomes the visible
+  page whenever WebGL is unavailable.
+-->
+<main class="kwad-soon" data-kwadzilla-soon>
 
-    <p class="kwad-hero__eyebrow"><span>Now playing &middot; Island Sector 1</span></p>
-
-    <h1 class="kwad-hero__title">
-      Kwadzilla
-      <small>The biggest lizard breaks out</small>
-    </h1>
-
-    <p class="kwad-hero__sub">
-      They built the whole island out of concrete and razor wire. They did not
-      plan for something forty feet tall with a bad attitude. Climb the walls,
-      pull the place apart, and get everybody off the rock.
-    </p>
-
-    <!-- The game mounts itself into this element. -->
-    <div
-      data-kwadzilla
-      data-cta-1-label="Shop the drop"
-      data-cta-1-url="#"
-      data-cta-2-label="Read the story"
-      data-cta-2-url="#"
-      data-reward-code="BIGLIZARD"
-      data-reward-label="Sector cleared — take 15% off"
-      data-reward-note="One use per customer. Applies at checkout."
-      data-reward-score="20000"
-      data-sound="on"></div>
-
-    <div class="kwad-hero__cta">
-      <a class="kwad-btn kwad-btn--go" href="#">Shop the drop</a>
-      <a class="kwad-btn kwad-btn--ghost" href="#">Read the story</a>
-    </div>
-
-    <ul class="kwad-facts">
-      <li>
-        <b>Rampage, but righteous</b>
-        <span>Every barred window you break lets somebody walk out. The score
-          that matters is the one marked FREED.</span>
-      </li>
-      <li>
-        <b>Ten storeys of concrete</b>
-        <span>Facilities crumble floor by floor. Knock the supports out and the
-          whole structure comes down on itself.</span>
-      </li>
-      <li>
-        <b>Fill the meter, breathe fire</b>
-        <span>Smashing builds RAGE. Cash it in for a few seconds of
-          invulnerable, fire-breathing demolition.</span>
-      </li>
-    </ul>
-
-    <p class="kwad-hero__foot">
-      Kwadzilla is a work of arcade fiction. Every facility, tower and logo in
-      the game is invented for the game. No real place, company or person is
-      depicted.
-    </p>
-
+  <div class="kwad-soon__static" aria-hidden="true">
+    <div class="kwad-soon__eye kwad-soon__eye--l"><i></i></div>
+    <div class="kwad-soon__eye kwad-soon__eye--r"><i></i></div>
   </div>
-</section>
 
-<script src="./assets/kwadzilla-game.js" defer></script>
+  <div class="kwad-soon__words">
+    <h1 class="kwad-soon__word">2072</h1>
+    <p class="kwad-soon__sub">Soundboy Kwad</p>
+    <p class="kwad-soon__note">Coming soon</p>
+  </div>
+
+  <noscript><style>.kwad-soon__static { opacity: 1; }</style></noscript>
+
+</main>
+
+<script src="./assets/kwadzilla-splash.js" defer></script>
 </body>
 </html>
