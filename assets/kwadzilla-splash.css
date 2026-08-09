@@ -1,0 +1,247 @@
+/*!
+ * KWADZILLA — 2072 / SOUNDBOY KWAD
+ * Coming-soon splash. Scoped under .kwad-soon so it can be dropped into any
+ * Shopify theme without leaking.
+ *
+ * Two layers live here:
+ *   1. the WebGL canvas the script injects (.kwad-soon__gl), and
+ *   2. a pure-CSS lizard + wordmark that shows whenever WebGL or JS is
+ *      unavailable. The script adds .is-gl on success, which hides layer 2
+ *      visually while leaving it in the accessibility tree.
+ */
+
+.kwad-soon {
+  --kwad-soon-hide: #0a0c08;
+  --kwad-soon-ground: #1d2118;
+  --kwad-soon-olive: #2f3a24;
+  --kwad-soon-ochre: #c9a24a;
+  --kwad-soon-cream: #e6d9a8;
+  --kwad-soon-red: #ff2a18;
+  --kwad-soon-red-dim: #8e1206;
+  --kwad-soon-ink: #eaf2ff;
+  --kwad-soon-dim: #93a3c4;
+  --kwad-soon-mono: ui-monospace, "SFMono-Regular", "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+  /* Written by the pointer handler so the CSS eyes track too. */
+  --kwad-gaze-x: 0;
+  --kwad-gaze-y: 0;
+
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  margin: 0;
+  background: var(--kwad-soon-hide);
+  color: var(--kwad-soon-ink);
+  font-family: var(--kwad-soon-mono);
+  text-align: center;
+  touch-action: none;
+  overscroll-behavior: none;
+  cursor: crosshair;
+}
+
+.kwad-soon__gl {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* ------------------------------------------------------------------ */
+/* CSS fallback — scales                                               */
+/* ------------------------------------------------------------------ */
+
+/* Hidden the moment the real thing is running. Kept in the flow (not
+   display:none) so the words underneath stay reachable by screen readers. */
+.kwad-soon__static {
+  position: absolute;
+  inset: 0;
+  opacity: 1;
+  transition: opacity 420ms ease;
+  background-color: var(--kwad-soon-ground);
+  background-image:
+    radial-gradient(60% 45% at 50% 30%, rgba(90, 104, 62, 0.55) 0%, rgba(90, 104, 62, 0) 70%),
+    radial-gradient(90% 70% at 50% 110%, rgba(8, 10, 6, 0.85) 0%, rgba(8, 10, 6, 0) 65%),
+    repeating-conic-gradient(
+      from 30deg,
+      var(--kwad-soon-olive) 0deg 60deg,
+      var(--kwad-soon-ground) 60deg 120deg);
+  background-size: auto, auto, 26px 26px;
+}
+
+.kwad-soon.is-gl .kwad-soon__static { opacity: 0; }
+
+/* ------------------------------------------------------------------ */
+/* CSS fallback — eyes                                                 */
+/* ------------------------------------------------------------------ */
+
+.kwad-soon__eye {
+  position: absolute;
+  top: 43%;
+  width: clamp(84px, 15vmin, 190px);
+  height: clamp(56px, 10vmin, 128px);
+  margin-top: calc(clamp(56px, 10vmin, 128px) / -2);
+  border-radius: 50%;
+  background:
+    radial-gradient(closest-side circle at 50% 50%,
+      #12100a 0%, #12100a 21%,
+      #7a4e08 22%, #b8862a 40%,
+      #e0ae3e 58%, #8a5c14 78%,
+      #120e05 92%, #050403 100%);
+  box-shadow:
+    inset 0 0.35em 0.7em rgba(0, 0, 0, 0.85),
+    0 0 0 2px rgba(10, 12, 8, 0.9),
+    0 0 3.5em rgba(200, 150, 40, 0.22);
+  clip-path: ellipse(50% 50% at 50% 50%);
+}
+
+.kwad-soon__eye--l { right: 52%; margin-right: clamp(6px, 1.2vmin, 16px); }
+.kwad-soon__eye--r { left: 52%; margin-left: clamp(6px, 1.2vmin, 16px); }
+
+/* Pupil + catchlight, offset by the shared gaze custom properties. */
+.kwad-soon__eye i {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 21%;
+  height: 32%;
+  border-radius: 50%;
+  background: #08070b;
+  transform: translate(-50%, -50%)
+             translate(calc(var(--kwad-gaze-x) * 22%), calc(var(--kwad-gaze-y) * -16%));
+  box-shadow: 0 0 0.5em rgba(0, 0, 0, 0.9);
+}
+
+.kwad-soon__eye i::after {
+  content: "";
+  position: absolute;
+  top: -14%;
+  left: 8%;
+  width: 46%;
+  height: 34%;
+  border-radius: 50%;
+  background: rgba(255, 250, 235, 0.92);
+  filter: blur(0.5px);
+}
+
+/* ------------------------------------------------------------------ */
+/* Wordmark                                                            */
+/* ------------------------------------------------------------------ */
+
+.kwad-soon__words {
+  position: absolute;
+  left: 50%;
+  top: 62%;
+  width: min(92vw, 900px);
+  transform: translateX(-50%);
+}
+
+.kwad-soon__word,
+.kwad-soon__sub {
+  margin: 0;
+  font-family: Impact, "Haettenschweiler", "Arial Narrow Bold", "Anton", var(--kwad-soon-mono);
+  font-weight: 900;
+  text-transform: uppercase;
+  color: #ffd9cf;
+  text-shadow:
+    0 0 0.08em #fff,
+    0 0 0.24em var(--kwad-soon-red),
+    0 0 0.7em var(--kwad-soon-red),
+    0 0 1.6em var(--kwad-soon-red-dim),
+    0 0.06em 0.12em rgba(0, 0, 0, 0.65);
+}
+
+.kwad-soon__word {
+  font-size: clamp(3.4rem, 17vw, 10rem);
+  line-height: 0.92;
+  letter-spacing: 0.06em;
+}
+
+.kwad-soon__sub {
+  margin-top: 0.35em;
+  font-size: clamp(1.05rem, 5.2vw, 3rem);
+  line-height: 1;
+  letter-spacing: 0.22em;
+}
+
+.kwad-soon__note {
+  margin: 1.6em 0 0;
+  font-size: clamp(0.58rem, 1.6vw, 0.72rem);
+  letter-spacing: 0.42em;
+  text-transform: uppercase;
+  color: rgba(147, 163, 196, 0.62);
+}
+
+/* In WebGL mode the shader draws the wordmark, so clip the DOM copies away
+   — visually only. They stay in the accessibility tree, so screen readers
+   and crawlers always get the real words. */
+.kwad-soon.is-gl .kwad-soon__word,
+.kwad-soon.is-gl .kwad-soon__sub {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* "Coming soon" is DOM-only, so it survives into WebGL mode as a real,
+   selectable line of text pinned to the bottom of the screen. */
+.kwad-soon.is-gl .kwad-soon__words {
+  top: auto;
+  bottom: max(1.6rem, env(safe-area-inset-bottom, 0px));
+  width: auto;
+}
+
+.kwad-soon.is-gl .kwad-soon__note {
+  margin: 0;
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------------ */
+/* Tilt permission prompt (iOS only)                                   */
+/* ------------------------------------------------------------------ */
+
+.kwad-soon__tilt {
+  position: absolute;
+  left: 50%;
+  bottom: calc(max(1.6rem, env(safe-area-inset-bottom, 0px)) + 2.4rem);
+  transform: translateX(-50%);
+  padding: 0.7em 1.3em;
+  font-family: inherit;
+  font-size: 0.66rem;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: rgba(234, 242, 255, 0.72);
+  background: rgba(10, 12, 8, 0.42);
+  border: 1px solid rgba(201, 162, 74, 0.34);
+  border-radius: 999px;
+  cursor: pointer;
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  animation: kwad-soon-pulse 3.2s ease-in-out infinite;
+}
+
+.kwad-soon__tilt:hover,
+.kwad-soon__tilt:focus-visible {
+  color: #fff;
+  border-color: rgba(201, 162, 74, 0.7);
+}
+
+.kwad-soon__tilt[hidden] { display: none; }
+
+@keyframes kwad-soon-pulse {
+  0%, 100% { opacity: 0.55; }
+  50%      { opacity: 0.9; }
+}
+
+/* ------------------------------------------------------------------ */
+/* Motion                                                              */
+/* ------------------------------------------------------------------ */
+
+@media (prefers-reduced-motion: reduce) {
+  .kwad-soon__static { transition: none; }
+  .kwad-soon__tilt { animation: none; opacity: 0.75; }
+}
