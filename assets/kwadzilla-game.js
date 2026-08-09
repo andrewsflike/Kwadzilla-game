@@ -35,18 +35,33 @@
   // original procedural pose function's local origin (0,0) used to be.
   // Computed once from each PNG's actual opaque bounding box, not guessed.
   var KWAD_META = {
-    idle:    { w: 96, h: 80, ax: 44.0, ay: 79 },
-    walk_a:  { w: 96, h: 80, ax: 45.0, ay: 79 },
-    walk_b:  { w: 96, h: 80, ax: 47.5, ay: 79 },
-    punch:   { w: 96, h: 80, ax: 47.5, ay: 79 },
-    climb_a: { w: 96, h: 80, ax: 46.0, ay: 79 },
-    climb_b: { w: 96, h: 80, ax: 50.5, ay: 79 },
-    roar:    { w: 96, h: 80, ax: 47.0, ay: 79 }
+    idle:      { w: 96, h: 80, ax: 44.0, ay: 79 },
+    walk_a:    { w: 96, h: 80, ax: 45.0, ay: 79 },
+    walk_b:    { w: 96, h: 80, ax: 47.5, ay: 79 },
+    punch:     { w: 96, h: 80, ax: 47.5, ay: 79 },
+    climb_a:   { w: 96, h: 80, ax: 46.0, ay: 79 },
+    climb_b:   { w: 96, h: 80, ax: 50.5, ay: 79 },
+    roar:      { w: 96, h: 80, ax: 47.0, ay: 79 },
+    // Scaled/anchored from each source PNG's own bounding box so the
+    // character reads at the same size as punch.png — see the comment on
+    // pickKwadFrame for how these map to real game moves.
+    punch_l:   { w: 106.5, h: 106.5, ax: 58.8, ay: 91.8 },
+    headbutt:  { w: 125.3, h: 125.3, ax: 65.3, ay: 106.8 },
+    run_punch: { w: 115.6, h: 115.6, ax: 68.0, ay: 98.8 },
+    high_kick: { w: 112.2, h: 112.2, ax: 59.5, ay: 95.7 },
+    wall_kick: { w: 85.2,  h: 85.2,  ax: 47.0, ay: 79.1 },
+    stomp_1:   { w: 114.7, h: 114.7, ax: 55.6, ay: 91.8 },
+    stomp_2:   { w: 108.7, h: 108.7, ax: 54.4, ay: 88.9 },
+    stomp_finisher: { w: 128.4, h: 128.4, ax: 66.8, ay: 110.1 }
   };
   var KWAD_FILES = {
     idle: 'kwad-idle.png', walk_a: 'kwad-walk-a.png', walk_b: 'kwad-walk-b.png',
     punch: 'kwad-punch.png', climb_a: 'kwad-climb-a.png', climb_b: 'kwad-climb-b.png',
-    roar: 'kwad-roar.png'
+    roar: 'kwad-roar.png',
+    punch_l: 'kwad-punch-l.png', headbutt: 'kwad-headbutt.png',
+    run_punch: 'kwad-run-punch.png', high_kick: 'kwad-high-kick.png',
+    wall_kick: 'kwad-wall-kick.png', stomp_1: 'kwad-stomp-1.png',
+    stomp_2: 'kwad-stomp-2.png', stomp_finisher: 'kwad-stomp-finisher.png'
   };
   var kwadImg = {};
   var kwadReady = false;
@@ -113,6 +128,20 @@
   var HUD_Y = 250;       // bottom HUD band
   var MAX_ROWS = 24;     // tallest a facility may get without clipping the HUD
   var JUMP_V = -6.5;     // launch speed of a full-height jump
+  var DASH_SPEED = 5.6;  // horizontal speed while a double-tap dash is active
+  var DASH_FRAMES = 14;  // how long the dash's forced velocity lasts
+  var DASH_TAP_WINDOW = 18;   // frames between two same-direction taps to count as a double-tap
+  var DASH_ATK_WINDOW = 20;   // frames after a dash starts during which pressing hit still counts as a dash-attack
+  var DASH_ATK_DECIDE = 10;   // frames to wait after the 1st dash-attack press for a 2nd (kick) before committing to the running punch
+  var COMBO_WINDOW = 46;      // frames a combo stays alive without a new hit before it resets
+  var CLIMB_BUFFER = 12;      // grace window (frames) an Up press waits for a building before it commits to a jump
+  var WALL_ATK_FRAMES = 24;   // total duration of the climbing drop-kick-slam
+  var WALL_ATK_IMPACT = 14;   // frame (counting down from WALL_ATK_FRAMES) the slam actually lands
+  var STOMP_FRAMES = 20;      // duration of one rooftop stomp
+  var STOMP_IMPACT = 11;      // frame (counting down) a stomp's floor actually gives way
+  var STOMP_WIN = 70;         // frames to land the next stomp before the streak resets
+  var STOMP_FINISH_FRAMES = 42; // duration of the 3rd-stomp jump-and-crash finisher
+  var STOMP_FINISH_IMPACT = 16; // frame (counting down) the finisher actually crashes down
   var MAX_PARTICLES = 420;
   var STORE_KEY = 'kwadzilla.v1';
   var STEP = 1000 / 60;
@@ -595,8 +624,13 @@
       x: 60, y: GROUND, vx: 0, vy: 0, facing: 1,
       mode: 'ground',           // ground | air | climb
       climb: null,
-      walk: 0, atk: 0, atkCool: 0,
-      jumps: 2, launch: 0,
+      walk: 0, atk: 0, atkCool: 0, atkKind: null, atkMult: 1,
+      combo: 0, comboWinT: 0,
+      tapDir: null, tapT: -999,
+      dashT: 0, dashDir: 0, dashAtkWinT: 0, dashAtkN: 0, dashAtkDecideT: 0,
+      wallAtk: 0, wallAtkSide: 1, wallAtkOrigX: 0,
+      stompN: 0, stompWinT: 0, stompT: 0, stompFinish: false, stompB: null,
+      jumps: 2, launch: 0, climbBufT: 0,
       hp: 100, maxHp: 100, inv: 0,
       rage: 0, rageT: 0,
       alive: true, roarT: 0
@@ -682,7 +716,9 @@
       camX = 0;
       P.x = 50; P.y = GROUND; P.vx = 0; P.vy = 0; P.mode = 'ground'; P.climb = null;
       P.hp = P.maxHp; P.inv = 90; P.atk = 0; P.rage = 0; P.rageT = 0; P.alive = true;
-      P.jumps = 2; P.launch = 0;
+      P.jumps = 2; P.launch = 0; P.climbBufT = 0;
+      P.combo = 0; P.comboWinT = 0; P.dashT = 0; P.dashAtkWinT = 0;
+      P.wallAtk = 0; P.stompN = 0; P.stompWinT = 0; P.stompT = 0; P.stompFinish = false; P.stompB = null;
       liberated = 0;
 
       // Turrets on top of watchtowers.
@@ -792,6 +828,29 @@
       for (var f = foes.length - 1; f >= 0; f--) {
         if (foes[f].host === b) { boom(foes[f].x, foes[f].y); foes.splice(f, 1); }
       }
+    }
+
+    // Rooftop stomp: unlike damageArea's radius-based chip damage, this
+    // guarantees the WHOLE top floor gives way at once — the "stomping
+    // progressively adds more force" fantasy needs a floor to visibly drop
+    // out from under you each time, not just a few cells.
+    function stompRow(b, force) {
+      if (!b.rows.length) return;
+      var ty = topOf(b);
+      var row = b.rows[0];
+      for (var c = 0; c < b.cols; c++) {
+        if (row[c]) {
+          if (row[c] === 3) freePrisoner(b.x + c * CELL + 4, ty);
+          b.alive--;
+        }
+      }
+      b.rows.splice(0, 1);
+      b.dirty = true;
+      addScore(80 + force * 40, null);
+      for (var d = 0; d < 10 + force * 4; d++) debris(b.x + rnd(0, b.w), ty + rnd(-4, 10), b.pal, 1);
+      shakeIt(3 + force * 1.5);
+      audio.smash();
+      if (b.state === 'alive' && (b.rows.length <= 1 || b.alive <= Math.max(4, b.startCells * 0.4))) collapse(b);
     }
 
     function damageArea(wx, wy, radius, opts) {
@@ -939,6 +998,24 @@
     /* ---------- player -------------------------------------------------*/
     function playerBox() { return { x: P.x - 15, y: P.y - 46, w: 30, h: 46 }; }
 
+    // Shared by the normal combo string and the dash-attacks — sets the
+    // animation timer + which move it is (for damage scaling and, once real
+    // frames exist per move, sprite selection) and optionally a feedback
+    // popup. atkMult scales both the building-cell radius and enemy damage
+    // at the payoff frame (see the P.atk === 10 block in updatePlayer).
+    function triggerAttack(kind, mult, label) {
+      P.atk = 14; P.atkCool = 12; P.atkKind = kind; P.atkMult = mult;
+      audio.punch();
+      if (label) pops.push({ x: P.x, y: P.y - 52, txt: label, life: 34, col: C.gold });
+    }
+
+    function startDash(dir) {
+      P.dashT = DASH_FRAMES; P.dashDir = dir; P.facing = dir;
+      P.dashAtkWinT = DASH_ATK_WINDOW; P.dashAtkN = 0; P.dashAtkDecideT = 0;
+      audio.jump();
+      for (var i = 0; i < 5; i++) spark(P.x - dir * 10, P.y - 22, '#cfe9ff', 1);
+    }
+
     function buildingAt(x) {
       for (var i = 0; i < buildings.length; i++) {
         var b = buildings[i];
@@ -954,10 +1031,46 @@
       var speed = P.rageT > 0 ? 2.7 : 2.0;
       var wantL = K.left, wantR = K.right;
 
+      // double-tap a direction to dash — only from the ground/air, and not
+      // while a dash or its attack-decision window is still resolving
+      if (P.mode !== 'climb' && P.dashT <= 0) {
+        if (consume('left')) {
+          if (P.tapDir === 'left' && tick - P.tapT < DASH_TAP_WINDOW) startDash(-1);
+          P.tapDir = 'left'; P.tapT = tick;
+        }
+        if (consume('right')) {
+          if (P.tapDir === 'right' && tick - P.tapT < DASH_TAP_WINDOW) startDash(1);
+          P.tapDir = 'right'; P.tapT = tick;
+        }
+      }
+
       if (P.mode === 'climb') {
         var b = P.climb;
-        if (!b || b.state !== 'alive') { P.mode = 'air'; P.climb = null; P.vy = 0; }
-        else {
+        if (!b || b.state !== 'alive') { P.mode = 'air'; P.climb = null; P.vy = 0; P.wallAtk = 0; }
+        else if (P.wallAtk > 0) {
+          // Drop-kick-slam: push off the wall, swing back in hard, land the
+          // hit, then settle back onto the surface to resume climbing.
+          var wElapsed = WALL_ATK_FRAMES - P.wallAtk;
+          if (wElapsed < 8) {
+            P.x += P.wallAtkSide * 2.2;               // pushing off
+          } else if (P.wallAtk > WALL_ATK_IMPACT) {
+            P.x -= P.wallAtkSide * 4.4;                // swinging back in
+          } else {
+            P.x += (P.wallAtkOrigX - P.x) * 0.4;        // settling back onto the wall
+          }
+          P.walk += 0.19;
+          if (P.wallAtk === WALL_ATK_IMPACT) {
+            var wx = P.wallAtkOrigX + P.wallAtkSide * 4, wy = P.y - 26;
+            damageArea(wx, wy, 21);
+            hurtFoes(wx, wy, 22, 3);
+            shakeIt(6);
+            spark(wx, wy, '#cfe9ff', 6);
+            audio.smash();
+            pops.push({ x: P.x, y: P.y - 52, txt: 'SLAM!', life: 30, col: C.gold });
+          }
+          P.wallAtk--;
+          if (P.wallAtk <= 0) { P.x = P.wallAtkOrigX; P.wallAtk = 0; }
+        } else {
           var cs = P.rageT > 0 ? 2.4 : 1.9;
           if (K.up) P.y -= cs;
           if (K.down) P.y += cs;
@@ -983,12 +1096,24 @@
             P.jumps = 1;          // still one mid-air jump left
             audio.jump();
             spark(P.x - away * 8, P.y - 24, '#cfe9ff', 5);
+          } else if (consume('hit') && P.atkCool === 0) {
+            // Building-context attack: replaces the normal punch while
+            // climbing with the heavier push-off-and-slam move above.
+            P.wallAtk = WALL_ATK_FRAMES;
+            P.wallAtkSide = (P.x < b.x + b.w / 2) ? -1 : 1;
+            P.wallAtkOrigX = P.x;
+            P.atkCool = 20;
+            audio.punch();
           }
         }
       }
 
       if (P.mode === 'ground' || P.mode === 'air') {
-        if (P.launch > 0) {
+        if (P.dashT > 0) {
+          P.dashT--;
+          P.vx = P.dashDir * DASH_SPEED;
+          if (P.mode === 'ground' && tick % 3 === 0) smoke(P.x - P.dashDir * 12, P.y - 4);
+        } else if (P.launch > 0) {
           // Preserve the wall kick for a few frames so it actually reads.
           P.launch--;
           P.vx *= 0.96;
@@ -998,7 +1123,7 @@
         else P.vx *= 0.6;
 
         P.x += P.vx;
-        if (Math.abs(P.vx) > 0.2 && P.mode === 'ground') P.walk += Math.abs(P.vx) * 0.14;
+        if (Math.abs(P.vx) > 0.2 && P.mode === 'ground') P.walk += Math.abs(P.vx) * (P.dashT > 0 ? 0.26 : 0.14);
 
         if (P.mode === 'ground') {
           P.jumps = 2;            // refilled on any solid footing
@@ -1006,10 +1131,21 @@
           var onStreet = P.y >= GROUND - 2;
           var bb = onStreet ? buildingAt(P.x) : null;
           if (bb && K.up) {
+            // Climbing wins outright — whether from a fresh press, or from
+            // walking into range during the buffered jump below.
             P.mode = 'climb'; P.climb = bb; P.y = GROUND - 4;
-            consume('up');
+            consume('up'); P.climbBufT = 0;
+          } else if (P.climbBufT > 0) {
+            // Still inside the grace window from an earlier Up press: hold
+            // off on the jump in case the player is still walking into
+            // climbing range (an Up tap a beat early is the common case,
+            // not a deliberate jump).
+            P.climbBufT--;
+            if (P.climbBufT === 0) {
+              P.jumps--; P.vy = JUMP_V; P.mode = 'air'; audio.jump();
+            }
           } else if (consume('jump') || consume('up')) {
-            P.jumps--; P.vy = JUMP_V; P.mode = 'air'; audio.jump();
+            P.climbBufT = CLIMB_BUFFER;
           }
         } else {
           // Cutting the jump short gives fine control over height.
@@ -1047,8 +1183,9 @@
         if (P.y >= GROUND) { P.y = GROUND; P.vy = 0; P.mode = 'ground'; }
       }
 
-      // Walking off a roof edge
-      if (P.mode === 'ground' && P.y < GROUND) {
+      // Walking off a roof edge — skipped mid-stomp so the finisher's brief
+      // leap doesn't get read as "walked off the edge" and dumped into air.
+      if (P.mode === 'ground' && P.y < GROUND && P.stompT <= 0) {
         var still = null;
         for (var j = 0; j < buildings.length; j++) {
           var bj = buildings[j];
@@ -1059,11 +1196,81 @@
         else P.y = topOf(still);
       }
 
+      // Rooftop stomp: on top of a building, the attack button replaces the
+      // normal punch with a progressive stomp — each hit drops the floor
+      // out from under you. Three in a streak (STOMP_WIN apart) become a
+      // jump-and-crash finisher that takes the whole building down at once.
+      if (P.stompT > 0) {
+        P.stompT--;
+        var sb = P.stompB;
+        if (P.stompFinish) {
+          var sElapsed = STOMP_FINISH_FRAMES - P.stompT;
+          if (sElapsed < 16) P.y -= 1.15;         // brief leap
+          else P.y += 2.0;                        // crashing back down
+          if (P.stompT === STOMP_FINISH_IMPACT && sb && sb.state === 'alive') {
+            collapse(sb);
+            shakeIt(10);
+            pops.push({ x: P.x, y: P.y - 60, txt: 'CRASH DOWN!', life: 36, col: C.fire2 });
+          }
+          if (P.stompT <= 0) { P.stompFinish = false; P.stompN = 0; P.stompB = null; }
+        } else if (P.stompT === STOMP_IMPACT && sb && sb.state === 'alive') {
+          stompRow(sb, P.stompN);
+          P.y = topOf(sb);
+        }
+      } else if (P.mode === 'ground' && P.y < GROUND - 2 && P.atkCool === 0 && pressed.hit) {
+        var bb2 = buildingAt(P.x);
+        if (bb2 && bb2.state === 'alive') {
+          consume('hit');
+          if (P.stompWinT <= 0) P.stompN = 0;
+          P.stompN++;
+          P.stompWinT = STOMP_WIN;
+          P.stompB = bb2;
+          audio.punch();
+          if (P.stompN >= 3) {
+            P.stompFinish = true;
+            P.stompT = STOMP_FINISH_FRAMES;
+            P.atkCool = 30;
+            pops.push({ x: P.x, y: P.y - 52, txt: 'FINISH HIM!', life: 34, col: C.red });
+          } else {
+            P.stompT = STOMP_FRAMES;
+            P.atkCool = 16;
+            pops.push({ x: P.x, y: P.y - 52, txt: 'STOMP x' + P.stompN, life: 26, col: C.gold });
+          }
+        }
+      }
+      if (P.stompWinT > 0) P.stompWinT--; else if (P.stompT <= 0) P.stompN = 0;
+
       P.x = clamp(P.x, 16, worldW - 16);
 
       /* attacks */
       if (P.atkCool > 0) P.atkCool--;
       if (P.atk > 0) P.atk--;
+      if (P.comboWinT > 0) P.comboWinT--; else P.combo = 0;
+
+      // Dash-attack: a hit press during the window right after a dash
+      // starts becomes a running punch (one press) or a high kick (two
+      // presses, quickly) — resolved ahead of the normal combo check below
+      // so it consumes the same 'hit' press instead of also throwing a
+      // normal punch the same frame.
+      if (P.dashAtkWinT > 0 && P.rageT <= 0) {
+        P.dashAtkWinT--;
+        if (consume('hit')) {
+          P.dashAtkN++;
+          if (P.dashAtkN === 1) {
+            P.dashAtkDecideT = DASH_ATK_DECIDE;
+          } else if (P.dashAtkN === 2) {
+            triggerAttack('high_kick', 1.7, 'KICK!');
+            P.dashAtkWinT = 0;
+          }
+        }
+        if (P.dashAtkDecideT > 0) {
+          P.dashAtkDecideT--;
+          if (P.dashAtkDecideT === 0 && P.dashAtkN === 1) {
+            triggerAttack('run_punch', 1.4, 'RUSH!');
+            P.dashAtkWinT = 0;
+          }
+        }
+      }
 
       if (P.rageT > 0) {
         P.rageT--;
@@ -1077,8 +1284,16 @@
         }
         if (P.rageT === 0) P.rage = 0;
       } else if (consume('hit') && P.atkCool === 0) {
-        P.atk = 14; P.atkCool = 12;
-        audio.punch();
+        // Normal combo string: alternates right/left. A 5th consecutive hit
+        // — not broken by taking damage or by waiting too long between
+        // swings — is a headbutt instead of a 5th punch.
+        P.combo++;
+        var finisher = P.combo >= 5;
+        var kind = finisher ? 'headbutt' : (P.combo % 2 === 1 ? 'punch_r' : 'punch_l');
+        var mult = finisher ? 2.4 : (1 + (P.combo - 1) * 0.15);
+        triggerAttack(kind, mult, finisher ? 'HEADBUTT!' : (P.combo > 1 ? 'x' + P.combo : null));
+        P.comboWinT = COMBO_WINDOW;
+        if (finisher) P.combo = 0;
       }
 
       if (P.atk === 10) {
@@ -1087,8 +1302,10 @@
         var climbing2 = P.mode === 'climb';
         var fx = climbing2 ? P.x + P.facing * 6 : P.x + P.facing * 26;
         var fy = P.y - (climbing2 ? 26 : 30);
-        var n = damageArea(fx, fy, climbing2 ? 15 : 13);
-        hurtFoes(fx, fy, 18, 2);
+        var mult2 = P.atkMult || 1;
+        var n = damageArea(fx, fy, (climbing2 ? 15 : 13) * (0.85 + mult2 * 0.15));
+        hurtFoes(fx, fy, 18 * (0.85 + mult2 * 0.15), Math.max(2, Math.round(2 * mult2)));
+        if (P.atkKind === 'headbutt') shakeIt(5);
         if (!n) audio.punch();
       }
 
@@ -1133,6 +1350,7 @@
       if (P.inv > 0 || !P.alive || P.rageT > 0) return;
       P.hp -= n;
       P.inv = 48;
+      P.combo = 0; P.comboWinT = 0;   // enemy fire breaks the punch streak
       hurtTint = 0.5;
       audio.hurt();
       shakeIt(3);
@@ -1366,6 +1584,8 @@
           P.x = clamp(camX + VW / 2, 20, worldW - 20);
           P.y = GROUND - 40; P.vy = 0; P.mode = 'air'; P.climb = null;
           P.rage = 0; P.rageT = 0; P.jumps = 2; P.launch = 0;
+          P.combo = 0; P.comboWinT = 0; P.dashT = 0; P.dashAtkWinT = 0;
+          P.wallAtk = 0; P.stompN = 0; P.stompWinT = 0; P.stompT = 0; P.stompFinish = false; P.stompB = null;
           state = 'play';
         }
       } else if (state === 'attract' || state === 'over') {
@@ -1720,7 +1940,12 @@
         walk: P.walk,
         moving: Math.abs(P.vx) >= 0.2 || P.mode !== 'ground',
         atk: P.atk,
+        atkKind: P.atkKind,
+        dashing: P.dashT > 0,
         climb: P.mode === 'climb',
+        wallAtk: P.wallAtk > 0,
+        stompT: P.stompT,
+        stompFinish: P.stompFinish,
         rage: P.rageT > 0,
         jaw: P.roarT > 0 || (P.rageT > 0 && K.hit),
         scale: 1
@@ -1744,10 +1969,26 @@
       drawKwadPoseProcedural(x, y, facing, pose);
     }
 
+    // Each atkKind is a real, distinct move in the game logic (damage,
+    // timing, combo state) — this just maps it to its sprite. punch_r has
+    // no dedicated frame yet, so it still borrows 'punch'.
     function pickKwadFrame(pose) {
       if (pose.jaw && !pose.climb) return 'roar';
+      if (pose.wallAtk) return 'wall_kick';
+      if (pose.stompFinish) return 'stomp_finisher';
+      // Two stomp frames cover every stomp in the streak: the coiled
+      // anticipation pose before the floor gives way, the explosive one at
+      // and after impact.
+      if (pose.stompT > 0) return pose.stompT > STOMP_IMPACT ? 'stomp_1' : 'stomp_2';
       if (pose.climb) return Math.sin(pose.walk * 1.4) > 0 ? 'climb_a' : 'climb_b';
-      if (pose.atk > 0) return 'punch';
+      if (pose.atk > 0) {
+        if (pose.atkKind === 'punch_l') return 'punch_l';
+        if (pose.atkKind === 'headbutt') return 'headbutt';
+        if (pose.atkKind === 'run_punch') return 'run_punch';
+        if (pose.atkKind === 'high_kick') return 'high_kick';
+        return 'punch';
+      }
+      if (pose.dashing) return Math.sin(pose.walk * 1.6) > 0 ? 'walk_a' : 'walk_b';
       if (pose.moving) return Math.sin(pose.walk) > 0 ? 'walk_a' : 'walk_b';
       return 'idle';
     }
