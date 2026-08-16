@@ -41,7 +41,7 @@ sections/kwadzilla-game.liquid     all-in-one section — Dawn & older OS 2.0
 templates/page.kwadzilla.json      page template for the above
 
 assets/kwadzilla-splash.js         the coming-soon page (WebGL)
-assets/kwadzilla-splash.css        splash styles + no-WebGL fallback
+assets/kwadzilla-splash.css        page styles + no-WebGL fallback
 sections/kwadzilla-coming-soon.liquid   section wrapping the above
 templates/password.json            the coming-soon page, wired up
 templates/page.coming-soon.json    the same thing as an ordinary page
@@ -182,50 +182,50 @@ instead.
 While the game is in development, the coming-soon page is the front door and
 the game lives at `game.html`. Nothing on the splash links to the game.
 
-It's a monitor lizard on a white seamless backdrop, lit like a studio shot.
-There is no model file: the animal is generated as geometry at load, skinned
-to a bone chain, and rendered in WebGL2.
+It is two eyes, dead centre, set into lizard skin that fills the page. There
+is no image to load and no model file: the skin and the eyes are generated at
+load and rendered in WebGL2.
 
-- **The animal.** A spine of 90 bones swept into rings, with the girth,
-  superellipse cross-section and surface displacement authored against real
-  proportions — a 1.6 m monitor with a 17 cm head, a trunk wider than it is
-  tall and a tail that is the other way round. Brow ridges, eye sockets, the
-  jaw line, nostrils, the ear disc, a loose throat and a keeled tail all come
-  from the same displacement function. Four sprawled limbs, twenty toes, twenty
-  claws, two eyes with lids that actually close, and a forked tongue.
-- **The skin.** A tiling relief map is baked once into a framebuffer at
-  startup and sampled triplanar off the rest pose, so the scales never stretch
-  or seam however hard the animal bends. Markings are procedural: rows of pale
-  ocelli across the back, bands down the tail, a barred jaw, a cream underside.
-- **The studio.** A three-light rig on a white cyclorama, with the backdrop lit
-  harder than the subject the way a real seamless is. Contact shadow and
-  ambient occlusion are integrated analytically against a couple of dozen
-  spheres that track the animal — with a source this soft that lands closer
-  than a shadow map would.
-- **The framing.** The camera solves for itself: it takes the animal's bounds,
-  picks a presentation angle from the aspect ratio, and iterates distance and
-  aim until the subject fills the frame properly. A phone in portrait gets the
-  animal turned towards the lens rather than a cropped tail.
+There is deliberately no lizard. An earlier version framed a camera on a whole
+animal's head and cropped in, which never stops being a head — it has a
+silhouette, and a silhouette means edges, and edges mean the page shows a
+picture of something rather than being the thing. So what gets built is the
+part that matters and nothing else exists.
 
-**What the visitor controls is its attention, and nothing else.** The head and
-eyes follow the cursor. Each eye aims itself, covering whatever the neck did
-not, clamped to what an eye can physically do. On a phone the same thing is
-driven by the gyroscope, so tilting the handset keeps the animal looking back
-at you.
+- **The skin.** A slab larger than any frame, shaped by a height field rather
+  than tiled flat: the dome of a skull, a ridge running down between the eyes,
+  a heavy brow shelf over each socket, folds beneath. Flat skin lit from one
+  side is wallpaper; it needs a brow to cast into the socket. Relief comes from
+  a tiling map baked once into a framebuffer at startup — rounded, overlapping
+  scales, a pebbling within each, and a micro grain that never resolves but
+  keeps the specular from looking swept. Scales crowd fine around the eye and
+  open out towards the edges, with the ring of enlarged shields a monitor
+  carries around its socket.
+- **The eyes.** Amber irises with radial striae and crypts, a hard limbal ring,
+  a round pupil, and faked corneal refraction — the iris sits behind a curved
+  lens of clear tissue, so the lookup is shifted along the view direction and
+  the pupil swims as the eye turns. Lids hood them to an almond rather than
+  rolling right back, which is the difference between alert and alarmed.
+- **The light.** One hard key from above and to the left, a cold bounce from
+  the lower right, a cool edge from behind. Occlusion and the brow's shadow are
+  solved analytically against the two sockets — they are known pits in known
+  places, so the height field can simply be asked.
 
-Everything else it does on its own: breathing, throat pumping, blinks that
-sometimes double, tongue flicks in bursts of one to three, a slow travelling
-wave down the tail, weight shifting between the feet, the occasional re-planted
-foot, and a rare full-body stretch.
+**What the visitor controls is where the eyes are looking, and nothing else.**
+They follow the cursor; on a phone they follow the phone, so tilting the
+handset keeps them locked on you. Both converge on the same point, which is
+what makes it read as attention rather than as two ornaments. Everything else
+runs on its own: blinks that are not quite synchronised between the two lids,
+microsaccades, and a slow drift of attention when nobody has moved for a while.
 
 Still zero dependencies and zero network requests. If WebGL2 is missing or
-JavaScript is off, a soft studio floor sweep takes over; the words are real DOM
-either way, so screen readers and crawlers always get them.
+JavaScript is off, a lit surface takes over; the words are real DOM either way,
+so screen readers and crawlers always get them.
 
-`prefers-reduced-motion` damps the idle behaviour to a fraction but keeps the
-gaze, since that is a direct response to the visitor's own input. Render scale
-drops automatically if frames get expensive, and the whole thing pauses when
-the tab is hidden or the page scrolls away.
+`prefers-reduced-motion` damps the involuntary movement to a fraction but keeps
+the gaze, since that is a direct response to the visitor's own input. Render
+scale drops automatically if frames get expensive, and the whole thing pauses
+when the tab is hidden or the page scrolls away.
 
 ### The custom font
 

@@ -1,6 +1,6 @@
 /*!
  * KWADZILLA — coming soon
- * A studio portrait of a monitor lizard on a white seamless backdrop.
+ * Two eyes, dead centre, set into lizard skin that fills the page.
  *
  * Everything is scoped under .kwad-soon so this can drop into any theme
  * without leaking. Two layers live here:
@@ -36,10 +36,10 @@
   --kwad-font-display: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
   --kwad-font-meta: ui-monospace, "SFMono-Regular", "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
 
-  --kwad-paper: #ffffff;
-  --kwad-ink: #14140f;
-  --kwad-ink-soft: #6a6a60;
-  --kwad-hair: rgba(20, 20, 15, 0.14);
+  --kwad-paper: #0b0c0a;
+  --kwad-ink: #f2efe6;
+  --kwad-ink-soft: rgba(242, 239, 230, 0.62);
+  --kwad-hair: rgba(242, 239, 230, 0.16);
 
   position: relative;
   display: flex;
@@ -54,7 +54,7 @@
   overscroll-behavior-y: none;
 }
 
-/* The studio. Sits behind the words and fills the frame. */
+/* The skin and the eyes. Sits behind the words and fills the frame. */
 .kwad-soon__gl {
   position: absolute;
   inset: 0;
@@ -62,19 +62,17 @@
   width: 100%;
   height: 100%;
   border: 0;
-  /* The backdrop the shader paints is white, so a mid-load canvas
-     matches the page instead of flashing black. */
+  /* Matches the page underneath, so a mid-load canvas never flashes. */
   background: var(--kwad-paper);
 }
 
-/* Shown until the canvas takes over, and for good if it never does:
-   a soft studio floor sweep so the page is never a blank white void. */
+/* Shown until the canvas takes over, and for good if it never does, so
+   the page is never a flat panel of colour. */
 .kwad-soon__floor {
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(58% 30% at 50% 78%, rgba(20, 20, 15, 0.13), rgba(20, 20, 15, 0) 70%),
-    linear-gradient(#ffffff 0%, #ffffff 52%, #f6f5f2 78%, #efeee9 100%);
+    radial-gradient(58% 44% at 50% 50%, #23241d, #101109 62%, #080906 100%);
   transition: opacity 700ms ease;
 }
 
@@ -99,6 +97,9 @@
 
 .kwad-soon__word {
   margin: 0;
+  /* The wordmark sits directly on skin. Without this it competes with the
+     scale detail underneath and neither wins. */
+  text-shadow: 0 0.06em 0.5em rgba(0, 0, 0, 0.75), 0 0 1.4em rgba(0, 0, 0, 0.55);
   font-family: var(--kwad-font-display);
   font-size: clamp(3.2rem, 13vw, 9.5rem);
   font-weight: 500;
@@ -109,6 +110,7 @@
 
 .kwad-soon__sub {
   margin: 0;
+  text-shadow: 0 0.05em 0.6em rgba(0, 0, 0, 0.8);
   font-family: var(--kwad-font-display);
   font-size: clamp(0.95rem, 2.6vw, 1.5rem);
   font-weight: 400;
@@ -117,7 +119,7 @@
   text-transform: uppercase;
 }
 
-/* Pinned to the bottom of the frame so the lizard owns the middle. */
+/* Pinned to the bottom of the frame so the eyes own the middle. */
 .kwad-soon__note {
   position: relative;
   z-index: 2;
@@ -130,6 +132,7 @@
   text-indent: 0.34em;
   text-transform: uppercase;
   color: var(--kwad-ink-soft);
+  text-shadow: 0 0.05em 0.7em rgba(0, 0, 0, 0.85);
   pointer-events: none;
 }
 

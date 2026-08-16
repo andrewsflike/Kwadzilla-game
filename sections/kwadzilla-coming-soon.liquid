@@ -1,11 +1,13 @@
 {% comment %}
   KWADZILLA — coming soon
 
-  A monitor lizard on a white seamless backdrop, generated as geometry in
-  the browser. Its head and eyes follow the cursor; on a phone they follow
-  the phone, so tilting the handset keeps the animal looking back at you.
-  Everything else it does — breathing, blinking, tongue flicks, the tail,
-  the slow shift of weight — it does on its own.
+  Two eyes, dead centre, set into lizard skin that fills the page. Both
+  the skin and the eyes are generated in the browser — there is no image
+  to load and no model file.
+
+  The eyes follow the cursor; on a phone they follow the phone, so tilting
+  the handset keeps them locked on you. The blinks, the micro-saccades and
+  the slow drift of attention run on their own.
 
   Drop this on the password template for a coming-soon page, or on any
   page template. Nothing here depends on the rest of the theme, so it can
@@ -62,7 +64,7 @@
 >
   {% comment %}
     Shown until the canvas takes over, and for good if it never does, so a
-    visitor without WebGL gets a studio sweep rather than a blank white box.
+    visitor without WebGL gets a lit surface rather than a flat panel.
   {% endcomment %}
   <div class="kwad-soon__floor" aria-hidden="true"></div>
 
@@ -151,15 +153,15 @@
     {
       "type": "color",
       "id": "color_paper",
-      "label": "Backdrop",
-      "default": "#ffffff",
-      "info": "The lizard is always lit against white paper. This tints the page around it."
+      "label": "Page colour",
+      "default": "#0b0c0a",
+      "info": "Shown before the canvas loads, and if WebGL is unavailable."
     },
     {
       "type": "color",
       "id": "color_ink",
       "label": "Text",
-      "default": "#14140f"
+      "default": "#f2efe6"
     },
     {
       "type": "header",
