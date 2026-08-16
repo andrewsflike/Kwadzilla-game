@@ -1,22 +1,22 @@
 {% comment %}
   KWADZILLA — coming soon
 
-  Two eyes, dead centre, set into lizard skin that fills the page. Both
-  the skin and the eyes are generated in the browser — there is no image
-  to load and no model file.
+  A volumetric fire filling the viewport, raymarched in the browser —
+  there is no image and no video to load.
 
-  The eyes follow the cursor; on a phone they follow the phone, so tilting
-  the handset keeps them locked on you. The blinks, the micro-saccades and
-  the slow drift of attention run on their own.
+  It reacts: on a pointer the flames lean towards the cursor and flare
+  under it, on a touchscreen a drag does the same and a tap throws a
+  burst, and the phone's own tilt pushes the whole front sideways.
 
   Drop this on the password template for a coming-soon page, or on any
   page template. Nothing here depends on the rest of the theme, so it can
   be lifted into another one as-is.
 
-  CUSTOM FONT
-  Upload the .woff2 to assets/ and name it in the section's Typeface
-  setting. The @font-face is written below and the wordmark picks it up
-  through --kwad-font-display. Nothing else needs changing.
+  WORDMARK
+  Paste an SVG into the Wordmark SVG setting and it replaces the two text
+  lines entirely — no other change needed. Leave it empty and the text is
+  used, in the custom font if one is set: upload the .woff2 to assets/ and
+  name it in the Typeface setting.
 {% endcomment %}
 
 {{ 'kwadzilla-splash.css' | asset_url | stylesheet_tag }}
@@ -69,6 +69,12 @@
   <div class="kwad-soon__floor" aria-hidden="true"></div>
 
   <div class="kwad-soon__words">
+    {% comment %}
+      An SVG here wins: the script sees it, adds .has-mark, and the text
+      lines below take themselves out.
+    {% endcomment %}
+    <div class="kwad-soon__mark" data-kwad-mark>{{ section.settings.wordmark_svg }}</div>
+
     {%- if section.settings.heading != blank -%}
       <h1 class="kwad-soon__word" data-kwad-split>{{ section.settings.heading }}</h1>
     {%- endif -%}
@@ -131,6 +137,16 @@
     },
     {
       "type": "header",
+      "content": "Wordmark"
+    },
+    {
+      "type": "html",
+      "id": "wordmark_svg",
+      "label": "Wordmark SVG",
+      "info": "Paste an <svg> here and it replaces the heading and subheading. Needs a viewBox to scale; use fill=\"currentColor\" to take the text colour."
+    },
+    {
+      "type": "header",
       "content": "Typeface"
     },
     {
@@ -154,14 +170,14 @@
       "type": "color",
       "id": "color_paper",
       "label": "Page colour",
-      "default": "#0b0c0a",
+      "default": "#080503",
       "info": "Shown before the canvas loads, and if WebGL is unavailable."
     },
     {
       "type": "color",
       "id": "color_ink",
       "label": "Text",
-      "default": "#f2efe6"
+      "default": "#fff3e4"
     },
     {
       "type": "header",
@@ -172,7 +188,7 @@
       "id": "tilt_label",
       "label": "Tilt permission prompt",
       "default": "Tap to let it follow you",
-      "info": "Shown only on iOS, which requires a tap before a page may read device motion."
+      "info": "Shown only on iOS, which requires a tap before a page may read device motion (used here for the tilt-driven wind)."
     }
   ],
   "presets": [

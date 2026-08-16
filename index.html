@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>2072 — Soundboy Kwad</title>
 <meta name="description" content="2072. Soundboy Kwad. Coming soon.">
-<meta name="theme-color" content="#0b0c0a">
+<meta name="theme-color" content="#080503">
 
 <!-- Social preview (swap the image URL for your own once hosted) -->
 <meta property="og:title" content="2072 — Soundboy Kwad">
@@ -14,7 +14,7 @@
 
 <link rel="stylesheet" href="./assets/kwadzilla-splash.css">
 <style>
-  html, body { margin: 0; padding: 0; background: #0b0c0a; }
+  html, body { margin: 0; padding: 0; background: #080503; }
   body { -webkit-font-smoothing: antialiased; }
 
   /*
@@ -46,6 +46,16 @@
   <div class="kwad-soon__floor" aria-hidden="true"></div>
 
   <div class="kwad-soon__words">
+
+    <!--
+      SVG WORDMARK SLOT
+      Paste the <svg> in here. The script spots it, hides the two text
+      lines below, and that is the whole swap. Give the SVG a viewBox so
+      it can scale, and fill="currentColor" if it should take the page
+      colour.
+    -->
+    <div class="kwad-soon__mark" data-kwad-mark></div>
+
     <h1 class="kwad-soon__word" data-kwad-split>2072</h1>
     <p class="kwad-soon__sub" data-kwad-split>Soundboy Kwad</p>
   </div>
