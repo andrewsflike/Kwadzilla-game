@@ -1,6 +1,6 @@
 /*!
  * KWADZILLA — coming soon
- * Two eyes, dead centre, set into lizard skin that fills the page.
+ * A volumetric fire filling the viewport, with the wordmark over it.
  *
  * Everything is scoped under .kwad-soon so this can drop into any theme
  * without leaking. Two layers live here:
@@ -36,10 +36,10 @@
   --kwad-font-display: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
   --kwad-font-meta: ui-monospace, "SFMono-Regular", "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
 
-  --kwad-paper: #0b0c0a;
-  --kwad-ink: #f2efe6;
-  --kwad-ink-soft: rgba(242, 239, 230, 0.62);
-  --kwad-hair: rgba(242, 239, 230, 0.16);
+  --kwad-paper: #080503;
+  --kwad-ink: #fff3e4;
+  --kwad-ink-soft: rgba(255, 243, 228, 0.60);
+  --kwad-hair: rgba(255, 243, 228, 0.16);
 
   position: relative;
   display: flex;
@@ -54,7 +54,7 @@
   overscroll-behavior-y: none;
 }
 
-/* The skin and the eyes. Sits behind the words and fills the frame. */
+/* The fire. Sits behind the words and fills the frame. */
 .kwad-soon__gl {
   position: absolute;
   inset: 0;
@@ -72,7 +72,9 @@
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(58% 44% at 50% 50%, #23241d, #101109 62%, #080906 100%);
+    radial-gradient(120% 78% at 50% 112%, #ff9a2e 0%, #d4471000 62%),
+    radial-gradient(90% 55% at 50% 104%, #ffd88a 0%, #b8300800 55%),
+    linear-gradient(#080503 0%, #12070300 46%, #2a0f04 100%);
   transition: opacity 700ms ease;
 }
 
@@ -97,8 +99,8 @@
 
 .kwad-soon__word {
   margin: 0;
-  /* The wordmark sits directly on skin. Without this it competes with the
-     scale detail underneath and neither wins. */
+  /* The wordmark sits directly on fire. Without this it competes with the
+     flame detail underneath and neither wins. */
   text-shadow: 0 0.06em 0.5em rgba(0, 0, 0, 0.75), 0 0 1.4em rgba(0, 0, 0, 0.55);
   font-family: var(--kwad-font-display);
   font-size: clamp(3.2rem, 13vw, 9.5rem);
@@ -119,7 +121,7 @@
   text-transform: uppercase;
 }
 
-/* Pinned to the bottom of the frame so the eyes own the middle. */
+/* Pinned to the bottom of the frame so the fire owns the middle. */
 .kwad-soon__note {
   position: relative;
   z-index: 2;
@@ -170,6 +172,41 @@
 .kwad-soon__tilt:focus-visible {
   outline: 2px solid var(--kwad-ink);
   outline-offset: -4px;
+}
+
+/* ------------------------------------------------------------------ */
+/* SVG wordmark slot                                                    */
+/* ------------------------------------------------------------------ */
+/*
+ * Drop an <svg> into [data-kwad-mark] and that is the whole job: the
+ * script sees a child element, adds .has-mark, and the two text lines
+ * below take themselves out. Nothing else needs editing.
+ *
+ * The SVG scales to the frame and inherits --kwad-ink, so `fill="currentColor"`
+ * on the paths will pick up the page colour. Give it a viewBox — without
+ * one it cannot scale.
+ */
+.kwad-soon__mark {
+  display: none;
+  width: min(78vw, 62rem);
+  max-width: 100%;
+  filter: drop-shadow(0 0.04em 0.5em rgba(0, 0, 0, 0.7));
+}
+
+.kwad-soon__mark svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  color: var(--kwad-ink);
+}
+
+.kwad-soon.has-mark .kwad-soon__mark {
+  display: block;
+}
+
+.kwad-soon.has-mark .kwad-soon__word,
+.kwad-soon.has-mark .kwad-soon__sub {
+  display: none;
 }
 
 /* ------------------------------------------------------------------ */

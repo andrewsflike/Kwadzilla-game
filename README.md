@@ -182,65 +182,64 @@ instead.
 While the game is in development, the coming-soon page is the front door and
 the game lives at `game.html`. Nothing on the splash links to the game.
 
-It is two eyes, dead centre, set into lizard skin that fills the page. There
-is no image to load and no model file: the skin and the eyes are generated at
-load and rendered in WebGL2.
+It is fire, filling the viewport. No image and no video: a flame front
+raymarched in WebGL2 against a 3D noise volume built at load.
 
-There is deliberately no lizard. An earlier version framed a camera on a whole
-animal's head and cropped in, which never stops being a head — it has a
-silhouette, and a silhouette means edges, and edges mean the page shows a
-picture of something rather than being the thing. So what gets built is the
-part that matters and nothing else exists.
+It is genuinely volumetric rather than a scrolling texture — rays march
+through a slab of density, so near tongues occlude far ones, the fire has
+depth to look into, and its light falls off through its own smoke. That is
+what a flat fire shader cannot do, and it is most of why this reads as fire
+rather than as an animation of fire.
 
-- **The skin.** A slab larger than any frame, shaped by a height field rather
-  than tiled flat: the dome of a skull, a ridge running down between the eyes,
-  a heavy brow shelf over each socket, folds beneath. Flat skin lit from one
-  side is wallpaper; it needs a brow to cast into the socket. Relief comes from
-  a tiling map baked once into a framebuffer at startup — rounded, overlapping
-  scales, a pebbling within each, and a micro grain that never resolves but
-  keeps the specular from looking swept. Scales crowd fine around the eye and
-  open out towards the edges, with the ring of enlarged shields a monitor
-  carries around its socket.
-- **The eyes.** Amber irises with radial striae and crypts, a hard limbal ring,
-  a round pupil, and faked corneal refraction — the iris sits behind a curved
-  lens of clear tissue, so the lookup is shifted along the view direction and
-  the pupil swims as the eye turns. Lids hood them to an almond rather than
-  rolling right back, which is the difference between alert and alarmed.
-- **The light.** One hard key from above and to the left, a cold bounce from
-  the lower right, a cool edge from behind. Occlusion and the brow's shadow are
-  solved analytically against the two sockets — they are known pits in known
-  places, so the height field can simply be asked.
+- **The volume.** Computing noise in the shader is the obvious approach and
+  the wrong one: a raymarch evaluates density tens of times per pixel, and
+  each evaluation would want a couple of dozen hashes. A 48³ RGBA 3D texture
+  turns each octave into one filtered fetch and lets the hardware interpolate.
+  Three of its channels are used together as a warp vector, so the domain
+  distortion costs a single fetch rather than three.
+- **The shape.** A threshold that climbs with height, which is what turns a
+  cloud into tongues that taper and break off. The sampling domain is squashed
+  vertically, because isotropic noise makes smoke and fire is drawn upward by
+  its own draft. Absorption is set high enough that the front of the fire hides
+  what is behind it — too low and every tongue in the slab sums into one flat
+  sheet of white.
+- **Embers** ride the same wind, born bright and dying cool, drawn additively
+  over the graded frame.
 
-**What the visitor controls is where the eyes are looking, and nothing else.**
-They follow the cursor; on a phone they follow the phone, so tilting the
-handset keeps them locked on you. Both converge on the same point, which is
-what makes it read as attention rather than as two ornaments. Everything else
-runs on its own: blinks that are not quite synchronised between the two lids,
-microsaccades, and a slow drift of attention when nobody has moved for a while.
+**It reacts to the visitor.** On a pointer the flames lean towards the cursor,
+flare under it, and the whole front leans on a wind that follows which side of
+the frame the cursor is on. On a touchscreen a drag does the same, a tap throws
+an expanding burst of heat, and the phone's own roll pushes the front sideways
+like wind on a torch — yielding to a finger the moment one lands, because a
+deliberate touch should beat the hand's own wobble. Every force is smoothed:
+fire has mass, and a pointer that jumps a hundred pixels between frames would
+otherwise snap the whole front sideways.
 
 Still zero dependencies and zero network requests. If WebGL2 is missing or
-JavaScript is off, a lit surface takes over; the words are real DOM either way,
-so screen readers and crawlers always get them.
+JavaScript is off, a banked ember glow takes over; the words are real DOM
+either way, so screen readers and crawlers always get them.
 
-`prefers-reduced-motion` damps the involuntary movement to a fraction but keeps
-the gaze, since that is a direct response to the visitor's own input. Render
-scale drops automatically if frames get expensive, and the whole thing pauses
-when the tab is hidden or the page scrolls away.
+`prefers-reduced-motion` slows the fire and the embers rather than stopping
+them, because fire that does not move is not fire. The raymarch trades march
+steps before it trades resolution — a volume degrades far more gracefully by
+taking fewer samples than by going blocky — and the whole thing pauses when the
+tab is hidden or the page scrolls away.
 
-### The custom font
+### The wordmark
 
-The wordmark reads from `--kwad-font-display`. Upload a `.woff2` to `assets/`
-and name it in the section's **Typeface** setting; the `@font-face` is written
-for you and nothing else needs touching. Outside Shopify, uncomment the block
-at the top of `index.html`.
+Paste an `<svg>` into the section's **Wordmark SVG** setting, or into the
+`[data-kwad-mark]` slot in `index.html`, and that is the entire swap: the
+script spots the element, adds `.has-mark`, and the two text lines take
+themselves out. Give the SVG a `viewBox` so it can scale, and
+`fill="currentColor"` if it should take the page colour. It is given
+`role="img"` and a label automatically if it has neither.
 
-The wordmark is already wired for animation. Every character is wrapped in its
-own `<span class="kwad-soon__ch">` with `--i` set to its index and `--n` to the
-total, the original string is kept alongside for screen readers, and
-`.kwad-soon` gains `.is-ready` on the first rendered frame. That's a per-letter
-stagger handle and a start signal; what ships now is a single plain settle,
-which is meant to be replaced once the real face lands. See the *wordmark
-animation hooks* block at the bottom of `assets/kwadzilla-splash.css`.
+With the slot empty the text lines are used instead, and read from
+`--kwad-font-display`: upload a `.woff2` to `assets/` and name it in the
+section's **Typeface** setting. Those lines are split into per-character spans
+carrying `--i` and `--n`, with `.is-ready` set on the first rendered frame —
+a stagger handle and a start signal for whatever animation comes later. See the
+*wordmark animation hooks* block at the bottom of `assets/kwadzilla-splash.css`.
 
 ## Controls
 
