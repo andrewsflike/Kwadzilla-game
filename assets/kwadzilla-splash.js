@@ -1,1321 +1,1552 @@
 /*!
- * KWADZILLA — 2072 / SOUNDBOY KWAD
- * Coming-soon splash. Zero dependencies, single file, no network requests.
+ * KWADZILLA — coming soon
  *
- * One fullscreen triangle, one fragment shader. It draws procedural monitor
- * lizard hide, two eyes that track the cursor (or the phone's tilt), and the
- * wordmark as red smoke. The letterforms are hand-authored vector strokes,
- * rasterised once to an offscreen canvas and uploaded as a texture.
+ * Two eyes, dead centre, set into lizard skin that fills the page. Zero
+ * dependencies, one file, no network requests: the skin and the eyes are
+ * generated at load and rendered in WebGL2.
  *
- * Mount by putting an element with [data-kwadzilla-soon] on the page.
- * The canvas is injected here so a visitor with JS off never sees an empty
- * box — they get the CSS fallback that ships in kwadzilla-splash.css.
+ * There is deliberately no lizard here. An earlier version framed a camera
+ * on a whole animal's head and cropped in, which never stops being a head:
+ * it has a silhouette, and a silhouette means edges, and edges mean the
+ * page shows a picture of something rather than being the thing. So what
+ * gets built is the part that matters — a slab of skin larger than any
+ * frame, brow ridges, two sockets, two eyes — and nothing else exists.
+ *
+ * The only thing a visitor can touch is where the eyes are looking. On a
+ * pointer they follow the cursor; on a phone they follow the phone, so
+ * tilting the handset keeps them locked on you. Everything else — blinks,
+ * micro-saccades, the slow drift of attention — runs on its own.
+ *
+ * Mount by putting an element with [data-kwadzilla-soon] on the page. The
+ * canvas is injected from here, so a visitor without JS or without WebGL2
+ * keeps the page and the wordmark rather than an empty box.
+ *
+ * Layout:
+ *   1. maths          vectors, quaternions, matrices, noise
+ *   2. gl helpers     shader/program/buffer/texture plumbing
+ *   3. the face       the numbers that describe skin, sockets and eyes
+ *   4. meshing        the skin slab, the globes, the lids
+ *   5. shaders        scale bake, skin, eye, post
+ *   6. behaviour      gaze, blinks, the small involuntary things
+ *   7. renderer       the frame loop
+ *   8. mount          DOM wiring, input, accessibility, teardown
  */
 (function () {
   'use strict';
 
-  /* ------------------------------------------------------------------ */
-  /* Constants                                                           */
-  /* ------------------------------------------------------------------ */
+  /* ================================================================== */
+  /* 1. Maths                                                            */
+  /* ================================================================== */
 
-  var STEP = 1000 / 60;        // fixed simulation tick, same as the game
-  var MAX_DPR = 2;             // hard ceiling on device pixel ratio
-  var COARSE_DPR = 1.5;        // ...and a lower one for touch screens
-  var IDLE_AFTER = 3500;       // ms of no input before the idle drift starts
-  var IDLE_FADE = 1200;        // ms to cross-fade into the idle drift
-  var LOOK_OMEGA = 9;          // critically-damped spring rate for `look`
-  var TILT_RANGE = 35;         // degrees of tilt that map to full deflection
-  var TILT_SETTLE = 2000;      // ms after a touch before tilt takes over again
-  var SACCADE_MS = 90;         // how long the eyes take to jump to a new target
-  var SACCADE_EPS = 0.035;     // how far the target must move to trigger a jump
-  var GAZE_MAX = 0.30;         // bound on pupil travel, in globe radii
-  var BLINK_MIN = 2600;
-  var BLINK_MAX = 7000;
-  var BLINK_CLOSE = 130;
-  var BLINK_OPEN = 180;
-  var PERF_WINDOW = 45;        // frames averaged before dropping render scale
-  var PERF_BUDGET = 22;        // ms per frame above which we scale down
-  var TEXT_MAX = 2048;         // largest text atlas edge
-  var STORE_KEY = 'kwadzilla.soon.v1';
-
-  /* ------------------------------------------------------------------ */
-  /* Small helpers                                                       */
-  /* ------------------------------------------------------------------ */
+  var PI = Math.PI;
+  var TAU = PI * 2;
 
   function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
   function lerp(a, b, t) { return a + (b - a) * t; }
-  function rnd(a, b) { return a + Math.random() * (b - a); }
-  function ease3(t) { return 1 - Math.pow(1 - t, 3); }
+  function sat(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
 
-  function store(key, val) {
-    try {
-      if (val === undefined) return window.localStorage.getItem(key);
-      window.localStorage.setItem(key, val);
-    } catch (e) { /* private mode, quota, disabled — never fatal */ }
-    return null;
+  function smoothstep(e0, e1, x) {
+    var t = sat((x - e0) / (e1 - e0));
+    return t * t * (3 - 2 * t);
   }
 
-  /* ------------------------------------------------------------------ */
-  /* Glyph outlines                                                      */
-  /* ------------------------------------------------------------------ */
+  function gauss(x, s) { return Math.exp(-(x * x) / (s * s)); }
 
-  /* Letterforms are stored as *centreline strokes with per-point width*
-     rather than as filled outlines. Authoring outlines by hand for 13
-     glyphs is unwieldy and gives uniform stem weight; a weighted skeleton
-     gets the thick/thin modulation and the tapered, pointed terminals the
-     horror face needs, out of a third of the data.
+  function v3sub(a, b) { return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]; }
+  function v3mul(a, s) { return [a[0] * s, a[1] * s, a[2] * s]; }
+  function v3dot(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+  function v3len(a) { return Math.sqrt(v3dot(a, a)); }
 
-     Each glyph is a list of strokes. A stroke is [closed, x,y,w, x,y,w, ...]
-     on a 100 x 140 em box, y down, origin top left. `w` is the half-width
-     at that point — drop it near 3 at a terminal and the stroke ends in a
-     spike. buildGlyphPath() interpolates the skeleton with Catmull-Rom and
-     offsets it into a fillable polygon. */
-  var GLYPHS = {
-    '2': [[0, 6,46,3, 14,20,7, 38,6,9, 66,8,9, 84,28,8, 78,54,9, 50,86,10, 18,124,7, 54,127,8, 92,122,3]],
-    '0': [[1, 50,6,5, 78,20,10, 86,70,12, 78,120,10, 50,134,5, 22,120,10, 14,70,12, 22,20,10]],
-    '7': [[0, 6,12,4, 46,7,9, 88,10,8, 66,56,9, 46,96,8, 34,134,3]],
-    'S': [[0, 86,26,4, 62,8,8, 30,12,9, 20,34,9, 44,58,9, 72,72,10, 82,98,9, 60,130,8, 24,128,7, 10,108,3]],
-    'O': [[1, 50,5,5, 80,19,10, 89,70,12, 80,121,10, 50,135,5, 20,121,10, 11,70,12, 20,19,10]],
-    'U': [[0, 10,8,4, 12,60,9, 18,104,10, 40,130,9, 66,128,9, 86,100,10, 90,54,9, 92,8,4]],
-    'N': [[0, 12,136,4, 12,74,9, 13,12,9, 20,26,9, 64,96,9, 87,132,9, 88,70,9, 89,8,4]],
-    'D': [[1, 16,134,8, 16,74,9, 16,10,8, 52,12,9, 82,42,10, 84,74,11, 76,112,10, 48,132,9]],
-    'B': [
-      [0, 16,8,8, 16,70,9, 16,134,8],
-      [0, 18,10,7, 54,10,8, 76,32,9, 58,66,8, 20,68,7],
-      [0, 18,70,7, 60,70,9, 82,98,10, 62,132,9, 18,134,7]
-    ],
-    'Y': [
-      [0, 8,8,4, 28,40,8, 48,70,9],
-      [0, 90,8,4, 70,40,8, 50,70,9],
-      [0, 49,66,9, 50,100,9, 51,136,4]
-    ],
-    'K': [
-      [0, 16,8,8, 16,72,9, 16,136,7],
-      [0, 88,8,4, 54,42,8, 20,72,9],
-      [0, 20,72,9, 56,100,8, 92,136,4]
-    ],
-    'W': [[0, 4,8,4, 14,60,9, 26,128,8, 40,72,8, 50,44,8, 60,72,8, 74,128,8, 86,60,9, 96,8,4]],
-    'A': [
-      [0, 8,136,4, 24,74,8, 48,10,8],
-      [0, 50,10,8, 74,74,8, 92,136,4],
-      [0, 26,92,5, 50,94,6, 74,92,5]
-    ]
-  };
+  function v3norm(a) {
+    var l = v3len(a);
+    return l > 1e-9 ? [a[0] / l, a[1] / l, a[2] / l] : [0, 0, 0];
+  }
 
-  /* Advance width per glyph, on the same 100-unit em. */
-  var ADVANCE = {
-    '2': 96, '0': 98, '7': 92, 'S': 94, 'O': 100, 'U': 100, 'N': 98,
-    'D': 96, 'B': 92, 'Y': 96, 'K': 100, 'W': 104, 'A': 100, ' ': 46
-  };
+  function v3cross(a, b) {
+    return [
+      a[1] * b[2] - a[2] * b[1],
+      a[2] * b[0] - a[0] * b[2],
+      a[0] * b[1] - a[1] * b[0]
+    ];
+  }
 
-  /* Per-glyph baseline jitter so a row never reads as mechanically even:
-     [dx, dy, rotation in degrees]. */
-  var JITTER = {
-    '2': [0, 1.5, -0.9], '0': [-1, -1.0, 0.7], '7': [1, 0.8, 1.1],
-    'S': [0, -1.2, -1.3], 'O': [-1, 1.0, 0.6], 'U': [1, -0.6, -0.5],
-    'N': [0, 1.3, 0.9], 'D': [-1, -0.9, -0.8], 'B': [1, 0.6, 1.2],
-    'Y': [0, -1.4, -0.6], 'K': [-1, 1.1, 0.8], 'W': [1, -0.7, -1.1],
-    'A': [0, 1.2, 0.5], ' ': [0, 0, 0]
-  };
+  /* Quaternions are [x, y, z, w]. */
 
-  /* Catmull-Rom through the skeleton points, carrying width along. */
-  function sampleStroke(pts, closed, steps) {
-    var n = pts.length / 3;
-    var out = [];
-    var segs = closed ? n : n - 1;
-    var i, s, k, t, tt, ttt, a, b, c, d, i0, i1, i2, i3;
+  function qmul(a, b) {
+    return [
+      a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1],
+      a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0],
+      a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3],
+      a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2]
+    ];
+  }
 
-    function at(idx) {
-      if (closed) { idx = ((idx % n) + n) % n; }
-      else { idx = clamp(idx, 0, n - 1); }
-      return idx * 3;
-    }
+  function qAxis(axis, ang) {
+    var h = ang * 0.5, s = Math.sin(h);
+    return [axis[0] * s, axis[1] * s, axis[2] * s, Math.cos(h)];
+  }
 
-    for (s = 0; s < segs; s++) {
-      i0 = at(s - 1); i1 = at(s); i2 = at(s + 1); i3 = at(s + 2);
-      for (k = 0; k < steps; k++) {
-        t = k / steps; tt = t * t; ttt = tt * t;
-        for (i = 0; i < 3; i++) {
-          a = pts[i0 + i]; b = pts[i1 + i]; c = pts[i2 + i]; d = pts[i3 + i];
-          out.push(0.5 * ((2 * b) + (-a + c) * t +
-            (2 * a - 5 * b + 4 * c - d) * tt +
-            (-a + 3 * b - 3 * c + d) * ttt));
-        }
+  /* Column-major 4x4, the layout WebGL wants. */
+
+  function mIdent(o) {
+    o[0] = 1; o[1] = 0; o[2] = 0; o[3] = 0;
+    o[4] = 0; o[5] = 1; o[6] = 0; o[7] = 0;
+    o[8] = 0; o[9] = 0; o[10] = 1; o[11] = 0;
+    o[12] = 0; o[13] = 0; o[14] = 0; o[15] = 1;
+    return o;
+  }
+
+  function mMul(o, a, b) {
+    var t = new Float32Array(16), i, j, k, s;
+    for (i = 0; i < 4; i++) {
+      for (j = 0; j < 4; j++) {
+        s = 0;
+        for (k = 0; k < 4; k++) s += a[k * 4 + j] * b[i * 4 + k];
+        t[i * 4 + j] = s;
       }
     }
-    if (!closed) {
-      out.push(pts[(n - 1) * 3], pts[(n - 1) * 3 + 1], pts[(n - 1) * 3 + 2]);
-    }
-    return out;
+    o.set(t);
+    return o;
   }
 
-  /* Offset a sampled skeleton into a closed polygon and add it to the path.
-     Open strokes become one loop (up one side, back down the other); closed
-     strokes become two loops filled even-odd, which leaves the counter. */
-  function addStroke(ctx, stroke) {
-    var closed = stroke[0] === 1;
-    var pts = stroke.slice(1);
-    var s = sampleStroke(pts, closed, 14);
-    var m = s.length / 3;
-    var left = [], right = [];
-    var i, px, py, nx, ny, dx, dy, len, w;
-
-    for (i = 0; i < m; i++) {
-      px = s[i * 3]; py = s[i * 3 + 1]; w = s[i * 3 + 2];
-      // Central difference tangent, wrapping when the stroke is a loop.
-      var ia = closed ? (i - 1 + m) % m : Math.max(0, i - 1);
-      var ib = closed ? (i + 1) % m : Math.min(m - 1, i + 1);
-      dx = s[ib * 3] - s[ia * 3];
-      dy = s[ib * 3 + 1] - s[ia * 3 + 1];
-      len = Math.sqrt(dx * dx + dy * dy) || 1;
-      nx = -dy / len; ny = dx / len;
-      left.push(px + nx * w, py + ny * w);
-      right.push(px - nx * w, py - ny * w);
-    }
-
-    ctx.moveTo(left[0], left[1]);
-    for (i = 1; i < m; i++) ctx.lineTo(left[i * 2], left[i * 2 + 1]);
-    if (closed) {
-      ctx.closePath();
-      ctx.moveTo(right[0], right[1]);
-      for (i = 1; i < m; i++) ctx.lineTo(right[i * 2], right[i * 2 + 1]);
-      ctx.closePath();
-    } else {
-      for (i = m - 1; i >= 0; i--) ctx.lineTo(right[i * 2], right[i * 2 + 1]);
-      ctx.closePath();
-    }
-    return closed;
+  function mPerspective(o, fovy, aspect, near, far) {
+    var f = 1 / Math.tan(fovy * 0.5), nf = 1 / (near - far);
+    mIdent(o);
+    o[0] = f / aspect; o[5] = f;
+    o[10] = (far + near) * nf; o[11] = -1;
+    o[14] = 2 * far * near * nf; o[15] = 0;
+    return o;
   }
 
-  /* Draw one glyph at the current transform origin, on the 100x140 em. */
-  function drawGlyph(ctx, ch) {
-    var g = GLYPHS[ch];
-    if (!g) return;
-    var i, closed;
-    for (i = 0; i < g.length; i++) {
-      ctx.beginPath();
-      closed = addStroke(ctx, g[i]);
-      ctx.fill(closed ? 'evenodd' : 'nonzero');
-    }
+  function mLookAt(o, eye, at, up) {
+    var z = v3norm(v3sub(eye, at));
+    var x = v3norm(v3cross(up, z));
+    var y = v3cross(z, x);
+    o[0] = x[0]; o[1] = y[0]; o[2] = z[0]; o[3] = 0;
+    o[4] = x[1]; o[5] = y[1]; o[6] = z[1]; o[7] = 0;
+    o[8] = x[2]; o[9] = y[2]; o[10] = z[2]; o[11] = 0;
+    o[12] = -v3dot(x, eye); o[13] = -v3dot(y, eye); o[14] = -v3dot(z, eye); o[15] = 1;
+    return o;
   }
 
-  function lineWidthEm(text) {
-    var w = 0, i, ch;
-    for (i = 0; i < text.length; i++) {
-      ch = text.charAt(i);
-      w += (ADVANCE[ch] || 90);
-    }
-    return w;
+  function mFromRT(o, q, t) {
+    var x = q[0], y = q[1], z = q[2], w = q[3];
+    var x2 = x + x, y2 = y + y, z2 = z + z;
+    var xx = x * x2, xy = x * y2, xz = x * z2;
+    var yy = y * y2, yz = y * z2, zz = z * z2;
+    var wx = w * x2, wy = w * y2, wz = w * z2;
+    o[0] = 1 - (yy + zz); o[1] = xy + wz; o[2] = xz - wy; o[3] = 0;
+    o[4] = xy - wz; o[5] = 1 - (xx + zz); o[6] = yz + wx; o[7] = 0;
+    o[8] = xz + wy; o[9] = yz - wx; o[10] = 1 - (xx + yy); o[11] = 0;
+    o[12] = t[0]; o[13] = t[1]; o[14] = t[2]; o[15] = 1;
+    return o;
   }
 
-  /* Run one pass of a whole line through drawGlyph, honouring tracking. */
-  function drawLine(ctx, text, x, y, scale, track) {
-    var i, ch, j, adv;
-    ctx.save();
-    ctx.translate(x, y);
-    ctx.scale(scale, scale);
-    for (i = 0; i < text.length; i++) {
-      ch = text.charAt(i);
-      adv = ADVANCE[ch] || 90;
-      if (ch !== ' ') {
-        j = JITTER[ch] || [0, 0, 0];
-        ctx.save();
-        ctx.translate(j[0], j[1]);
-        ctx.rotate(j[2] * Math.PI / 180);
-        drawGlyph(ctx, ch);
-        ctx.restore();
-      }
-      ctx.translate(adv + track, 0);
-    }
-    ctx.restore();
+  function mNormal3(o, m) {
+    o[0] = m[0]; o[1] = m[1]; o[2] = m[2];
+    o[3] = m[4]; o[4] = m[5]; o[5] = m[6];
+    o[6] = m[8]; o[7] = m[9]; o[8] = m[10];
+    return o;
   }
 
-  /* ------------------------------------------------------------------ */
-  /* Text atlas                                                          */
-  /* ------------------------------------------------------------------ */
-
-  var LINE_1 = '2072';
-  var LINE_2 = 'SOUNDBOY KWAD';
-
-  /* Three fields packed into RGB, so the shader gets all of them in one
-     upload: R = hard coverage, G = blurred (halo and smoke density),
-     B = dilated (extrusion depth). */
-  function buildTextAtlas(cssW, dpr) {
-    var w = Math.min(TEXT_MAX, Math.max(256, Math.round(cssW * dpr)));
-    var pad = Math.round(w * 0.10);
-
-    // Line 1 fills ~62% of the block. Line 2 is then sized by *width* to
-    // ~86% of line 1 — with 13 glyphs against 4, matching optical weight is
-    // a width problem, not a point-size one. Cap height falls out at about
-    // a third of line 1, which is the "few points smaller" the brief wants.
-    var inner = w - pad * 2;
-    var w1 = inner * 0.62;
-    var track2 = 22;
-    var s1 = w1 / lineWidthEm(LINE_1);
-    var em2 = lineWidthEm(LINE_2) + track2 * (LINE_2.length - 1);
-    var s2 = (w1 * 0.86) / em2;
-
-    var h1 = 140 * s1;
-    var h2 = 140 * s2;
-    var gap = h1 * 0.20;
-    var h = Math.round(pad * 2 + h1 + gap + h2);
-
-    var cv = document.createElement('canvas');
-    cv.width = w; cv.height = h;
-    var ctx = cv.getContext('2d');
-
-    ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, w, h);
-    ctx.globalCompositeOperation = 'lighter';
-
-    var x1 = (w - w1) / 2;
-    var x2 = (w - em2 * s2) / 2;
-    var y1 = pad;
-    var y2 = pad + h1 + gap;
-
-    function paint() {
-      drawLine(ctx, LINE_1, x1, y1, s1, 0);
-      drawLine(ctx, LINE_2, x2, y2, s2, track2);
-    }
-
-    // R — hard coverage.
-    ctx.fillStyle = '#ff0000';
-    paint();
-
-    // G — blurred. ctx.filter is unavailable on older Safari, so fall back
-    // to a handful of jittered low-alpha passes.
-    ctx.fillStyle = '#00ff00';
-    var blur = Math.max(2, w * 0.010);
-    if (typeof ctx.filter === 'string') {
-      ctx.filter = 'blur(' + blur.toFixed(1) + 'px)';
-      paint();
-      ctx.filter = 'none';
-    } else {
-      ctx.globalAlpha = 0.22;
-      var k, ang;
-      for (k = 0; k < 6; k++) {
-        ang = k / 6 * Math.PI * 2;
-        ctx.save();
-        ctx.translate(Math.cos(ang) * blur, Math.sin(ang) * blur);
-        paint();
-        ctx.restore();
-      }
-      ctx.globalAlpha = 1;
-    }
-
-    // B — dilated, for the extrusion depth ramp.
-    ctx.fillStyle = '#0000ff';
-    ctx.strokeStyle = '#0000ff';
-    ctx.lineJoin = 'round';
-    ctx.lineCap = 'round';
-    ctx.lineWidth = Math.max(2, w * 0.006);
-    ctx.save();
-    paint();
-    ctx.restore();
-
-    return cv;
+  /* Cheap deterministic value noise, for the involuntary movement and for
+     the large-scale lumps in the skin. Reproducibility matters more here
+     than spectral quality. */
+  function hash1(n) {
+    var s = Math.sin(n * 127.1) * 43758.5453123;
+    return s - Math.floor(s);
   }
 
-  /* ------------------------------------------------------------------ */
-  /* Shader source                                                       */
-  /* ------------------------------------------------------------------ */
-
-  /* No template literals in this codebase, so the shaders are string
-     arrays. Keep one GLSL statement per entry — it makes compiler error
-     line numbers line up with what you see here. */
-  var VERT = [
-    'attribute vec2 aPos;',
-    'void main() { gl_Position = vec4(aPos, 0.0, 1.0); }'
-  ].join('\n');
-
-  /* fwidth() lives behind OES_standard_derivatives in WebGL1, so the
-     extension directive is prepended at link time only when the context
-     actually grants it — see buildFrag(). */
-  var FRAG = [
-    '#ifdef GL_FRAGMENT_PRECISION_HIGH',
-    'precision highp float;',
-    '#else',
-    'precision mediump float;',
-    '#endif',
-
-    'uniform vec2  uRes;',
-    'uniform float uT;',          // motion time, frozen under reduced-motion
-    'uniform vec2  uLook;',
-    'uniform vec2  uGazeL;',
-    'uniform vec2  uGazeR;',
-    'uniform float uBlink;',
-    'uniform float uPupil;',
-    'uniform float uQuality;',
-    'uniform float uIntro;',
-    'uniform sampler2D uText;',
-    'uniform vec4  uTextRect;',
-
-    'const float DENSITY = 21.0;',
-    'const float HEIGHT  = 0.85;',
-    'const float JIT     = 0.36;',
-
-    /* -------- hashes. fract-only (Dave Hoskins style): the classic
-       fract(sin(dot(...))) loses precision on mediump and bands badly
-       across a surface this large. -------- */
-    'float hash11(float p) {',
-    '  p = fract(p * 0.1031);',
-    '  p *= p + 33.33;',
-    '  p *= p + p;',
-    '  return fract(p);',
-    '}',
-
-    'float hash12(vec2 p) {',
-    '  vec3 p3 = fract(vec3(p.xyx) * 0.1031);',
-    '  p3 += dot(p3, p3.yzx + 33.33);',
-    '  return fract((p3.x + p3.y) * p3.z);',
-    '}',
-
-    'vec2 hash22(vec2 p) {',
-    '  vec3 p3 = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973));',
-    '  p3 += dot(p3, p3.yzx + 33.33);',
-    '  return fract((p3.xx + p3.yz) * p3.zy);',
-    '}',
-
-    'float vnoise(vec2 p) {',
-    '  vec2 i = floor(p), f = fract(p);',
-    '  vec2 u = f * f * (3.0 - 2.0 * f);',
-    '  return mix(mix(hash12(i), hash12(i + vec2(1.0, 0.0)), u.x),',
-    '             mix(hash12(i + vec2(0.0, 1.0)), hash12(i + vec2(1.0, 1.0)), u.x), u.y);',
-    '}',
-
-    'float fbm2(vec2 p) {',
-    '  float a = 0.5, s = 0.0;',
-    '  for (int i = 0; i < 2; i++) { s += a * vnoise(p); p *= 2.02; a *= 0.5; }',
-    '  return s / 0.75;',
-    '}',
-
-    'float fbm4(vec2 p) {',
-    '  float a = 0.5, s = 0.0;',
-    '  for (int i = 0; i < 4; i++) { s += a * vnoise(p); p *= 2.02; a *= 0.5; }',
-    '  return s / 0.9375;',
-    '}',
-
-    /* -------- Voronoi. One call is ~9 hash evaluations and it is the most
-       expensive thing in the shader, so the skin makes exactly one, plus a
-       second low-density one for the ocelli on the full-quality path. */
-    'float cells(vec2 x, float jit, out vec2 toSeed, out vec2 id, out float f2) {',
-    '  vec2 n = floor(x);',
-    '  vec2 f = fract(x);',
-    '  float f1 = 8.0;',
-    '  f2 = 8.0; toSeed = vec2(0.0); id = n;',
-    '  for (int j = -1; j <= 1; j++) {',
-    '    for (int i = -1; i <= 1; i++) {',
-    '      vec2 g = vec2(float(i), float(j));',
-    '      vec2 o = hash22(n + g);',
-    '      vec2 r = g + 0.5 + (o - 0.5) * jit * 2.0 - f;',
-    '      float d = dot(r, r);',
-    '      if (d < f1) { f2 = f1; f1 = d; toSeed = r; id = n + g; }',
-    '      else if (d < f2) { f2 = d; }',
-    '    }',
-    '  }',
-    '  f2 = sqrt(f2);',
-    '  return sqrt(f1);',
-    '}',
-
-    /* -------- lizard hide -------- */
-    'vec3 skin(vec2 p, out float NoLout, out vec3 Nout) {',
-    '  vec2 pMacro = p - uLook * 0.026 * (fbm2(p * 3.0) - 0.5);',
-    '  vec2 pBead  = p - uLook * 0.007;',
-
-    // Bead rows bend along body contours, and bead size drifts by region.
-    '  vec2 q = pBead * DENSITY;',
-    '  q += 0.22 * vec2(fbm2(pBead * 1.7), fbm2(pBead * 1.7 + 5.2));',
-    '  q *= mix(0.78, 1.35, fbm2(pBead * 0.6));',
-    '  q.y *= 1.14;',
-
-    '  vec2 toSeed, id; float f2;',
-    '  float f1 = cells(q, JIT, toSeed, id, f2);',
-    '  float idf = id.x * 57.0 + id.y * 131.0;',
-
-    // f1/f2 is 0 at the seed and exactly 1 on the cell boundary, whatever
-    // that cell's size or shape. A fixed radius instead either clamps early
-    // — flat plateau, hard crease at the edge, the mosaic look — or falls
-    // short of the boundary and leaves loose pebbles on a dark ground. This
-    // makes each bead a dome that fills its own cell and meets its
-    // neighbours, which is how beaded hide actually packs.
-    // Ending the dome at 85% of the way to the boundary keeps the bead's
-    // iso-contours circular (f1 is a radius) instead of polygonal, and the
-    // remainder becomes the groove. Going all the way to 1.0 gives crazy
-    // paving; a fixed radius gives loose pebbles.
-    '  float rc = clamp(f1 / max(0.80 * f2, 1e-4), 0.0, 1.0);',
-    // A paraboloid cap, not a hemisphere: the hemisphere's dh/dr blows up at
-    // the rim. The paraboloid's gradient is linear in r, so the bead stays
-    // round all the way out to the groove.
-    '  float dome = max(0.0, 1.0 - rc * rc);',
-    '  float grv  = smoothstep(1.0, 0.90, rc);',            // groove at the cell edge
-
-    // Analytic normal: dh/dr = -2r for the cap above. Finite differences
-    // would mean three more cells() calls.
-    '  vec2 n2 = -normalize(toSeed + 1e-5) * (2.0 * rc) * HEIGHT;',
-    '  n2 += 0.12 * (hash22(id) - 0.5);',                    // per-bead tilt
-    '  if (uQuality > 0.5) {',
-    '    n2 += 0.055 * vec2(vnoise(q * 9.0) - vnoise(q * 9.0 + 3.1),',
-    '                       vnoise(q * 9.0 + 7.7) - vnoise(q * 9.0 + 1.3));',
-    '  }',
-    '  vec3 N = normalize(vec3(n2, 1.0));',
-    '  Nout = N;',
-
-    '  vec3 L = normalize(vec3(uLook * 1.1 + vec2(0.18, 0.42), 0.58));',
-    '  vec3 V = normalize(vec3(-p * 0.35, 1.4));',
-    '  vec3 H = normalize(L + V);',
-    '  H.x /= 1.35;',                                        // row anisotropy
-    '  H = normalize(H);',
-    '  float NoL = max(dot(N, L), 0.0);',
-    '  float NoH = max(dot(N, H), 0.0);',
-    '  float NoV = max(dot(N, V), 1e-4);',
-    '  float VoH = max(dot(V, H), 0.0);',
-    '  NoLout = NoL;',
-
-    // GGX, with roughness varying per scale. That variance is the shimmer.
-    '  float rough = 0.17 + 0.24 * hash11(idf + 3.7);',
-    '  float a = rough * rough, a2 = a * a;',
-    '  float dd = NoH * NoH * (a2 - 1.0) + 1.0;',
-    '  float D = a2 / (3.14159265 * dd * dd);',
-    '  float F = 0.045 + 0.955 * pow(1.0 - VoH, 5.0);',
-    '  float spec = min(D * F * NoL / (4.0 * NoV + 0.02), 5.0);',
-
-    '  vec3 specCol = vec3(1.0);',
-    '  if (uQuality > 0.5) {',
-    '    float irMask = smoothstep(0.52, 0.78, fbm2(pMacro * 1.9 + 11.0));',
-    '    vec3 tint = 0.5 + 0.5 * cos(6.2831853 * (vec3(0.0, 0.33, 0.67)',
-    '                + hash11(idf) * 0.4 + 2.1 * NoH));',
-    '    specCol = mix(vec3(1.0), tint, 0.32 * irMask);',
-    '  }',
-
-    /* Colour is sampled at the bead's seed, not at the fragment, so every
-       bead takes one flat colour the way real beaded skin does. Sampling
-       per-fragment makes it look like a photo stretched over bumps. */
-    '  vec2 pc = pMacro + toSeed / DENSITY;',
-
-    '  vec3 base = mix(vec3(0.052, 0.062, 0.043), vec3(0.108, 0.132, 0.076),',
-    '                  fbm4(pc * 2.2));',
-    '  float band = 0.5 + 0.5 * sin(pc.y * 4.1 + 2.0 * fbm2(pc * 1.1));',
-
-    // A second, sparse Voronoi. An ocellus is a ring of pale beads around a
-    // dark centre, so take a band at a fixed radius from the seed rather
-    // than the whole cell edge — and give only some cells one, or the
-    // pattern turns into a uniform net.
-    '  vec2 ts2, id2; float g2;',
-    '  float g1 = cells(pc * 5.0, 0.45, ts2, id2, g2);',
-    '  float has = step(0.48, hash11(id2.x * 57.0 + id2.y * 131.0 + 4.2));',
-    '  float oc = smoothstep(0.15, 0.21, g1) * smoothstep(0.33, 0.26, g1) * has;',
-    '  float dark = smoothstep(0.16, 0.05, g1) * has;',
-    '  oc *= mix(0.30, 1.0, band);',
-    '  base = mix(base, vec3(0.038, 0.042, 0.030), dark * 0.75);',
-    '  base = mix(base, mix(vec3(0.620, 0.440, 0.140), vec3(0.815, 0.735, 0.470),',
-    '             hash11(idf + 8.1)), oc * 0.92);',
-    '  base = mix(base, vec3(0.760, 0.690, 0.440), step(0.975, hash11(idf + 19.0)) * 0.5);',
-
-    // Dirt collects between beads: darken and desaturate in the grooves.
-    '  base *= mix(0.28, 1.0, grv);',
-    '  base = mix(vec3(dot(base, vec3(0.299, 0.587, 0.114))), base, mix(0.45, 1.0, grv));',
-
-    // Gate the subsurface on `grv` as well as the dome. Without it the term
-    // is at full strength everywhere between the beads, and the grooves
-    // turn into warm brown mud that swamps the whole surface.
-    '  float wrap = clamp((NoL + 0.42) / 1.42, 0.0, 1.0);',
-    '  vec3 sss = vec3(0.42, 0.20, 0.09) * pow(wrap, 2.2) * (1.0 - dome) * grv * 0.30;',
-
-    '  vec3 col = base * (0.19 + 1.28 * NoL) + sss + specCol * spec * grv * 1.35;',
-    '  col += base * 0.12 * (0.5 + 0.5 * N.y);',                 // sky bounce
-    '  return col;',
-    '}',
-
-    /* -------- one eye -------- */
-    /* Returns rgb, and writes aperture coverage to cov. `side` is -1 for the
-       left eye and +1 for the right so the outer canthus can droop. */
-    'vec3 eye(vec2 p, vec2 c, float R, vec2 gaze, float side, out float cov) {',
-    '  vec2 ae = vec2(0.166, 0.111);',
-    '  vec2 el = (p - c) / ae;',
-    '  el.y += side * el.x * 0.10;',                            // droop outward
-
-    '  float xx = clamp(el.x, -1.0, 1.0);',
-    '  float hh = pow(max(0.0, 1.0 - xx * xx), 0.9);',           // near-pointed canthi
-    '  float upper =  0.98 * hh;',
-    '  float lower = -0.86 * hh;',
-    '  upper = mix(upper, lower + 0.02, uBlink);',
-
-    '  float d = max(el.y - upper, lower - el.y);',
-    '  d = max(d, abs(el.x) - 1.0);',
-    '#ifdef HAS_DERIV',
-    '  float aa = max(fwidth(d), 1e-4);',
-    '#else',
-    // Without derivatives, size the edge by hand: one device pixel in
-    // p-space, expressed in the aperture's normalised units.
-    '  float aa = clamp(2.0 / (min(uRes.x, uRes.y) * ae.y), 1e-4, 0.2);',
-    '#endif',
-    '  cov = 1.0 - smoothstep(-aa, aa, d);',
-    '  if (cov <= 0.001) return vec3(0.0);',
-
-    '  vec2 e = (p - c) / R;',
-    '  float r2 = dot(e, e);',
-    '  float z = sqrt(max(0.0, 1.0 - min(r2, 1.0)));',
-    '  vec3 Ne = vec3(e, z);',
-
-    // Corneal refraction into the iris plane. The ~8% limbal magnification
-    // and the bend near the rim is the wet-eye cue; without it the iris
-    // reads as a flat decal.
-    '  vec3 Vd = normalize(vec3(e * 0.30, -1.0));',
-    '  vec3 rd = refract(Vd, Ne, 1.0 / 1.34);',
-    '  float tt = (z - 0.58) / max(1e-3, -rd.z);',
-    '  vec2 irisUV = e + rd.xy * clamp(tt, 0.0, 1.2);',
-
-    '  vec2 iv = irisUV - gaze;',
-    '  float ir = length(iv) / 0.62;',
-
-    // Fibres sampled on the direction vector — sampling atan() directly
-    // leaves a seam at +/-pi that is instantly recognisable.
-    '  vec2 dir = iv / max(1e-4, length(iv));',
-    '  float fib = vnoise(dir * 26.0 + ir * 3.0) * 0.62',
-    '            + vnoise(dir * 61.0 + ir * 7.0) * 0.38;',
-    '  float collar = smoothstep(0.40, 0.52, ir);',
-    '  fib = mix(fib * 0.7, fib, collar);',
-
-    '  vec3 iris = mix(vec3(0.80, 0.44, 0.05), vec3(1.00, 0.76, 0.18),',
-    '                  smoothstep(0.30, 1.0, ir));',
-    '  iris *= 0.62 + 0.72 * fib;',
-    '  iris = mix(iris, iris * vec3(0.82, 1.0, 0.72), 0.25 * fib);',
-    '  iris *= mix(0.42, 1.0, smoothstep(0.20, 0.46, ir));',      // contraction folds
-    '  iris += vec3(0.9, 0.75, 0.35) * step(0.965, hash12(dir * 40.0 + ir * 9.0)) * 0.5;',
-
-    '  float pupR = 0.21 * uPupil;',
-    '  float pup = smoothstep(pupR, pupR + 0.018, ir);',
-    '  vec3 col = mix(vec3(0.012, 0.010, 0.014), iris, pup);',
-
-    // Limbal ring. This is what makes an eye read as piercing.
-    '  col = mix(col, vec3(0.02, 0.016, 0.012), smoothstep(0.90, 1.0, ir));',
-    '  col *= mix(1.0, 0.55, smoothstep(1.0, 1.22, ir));',
-
-    // Varanids show almost no sclera — dark ochre-grey, not human white.
-    '  col = mix(col, vec3(0.100, 0.086, 0.062), smoothstep(1.16, 1.42, ir));',
-
-    // Lid cast shadow + contact AO, strongest under the upper lid.
-    '  float lidD = clamp((upper - el.y) / max(0.001, upper - lower), 0.0, 1.0);',
-    '  col *= mix(0.28, 1.0, smoothstep(0.0, 0.42, lidD));',
-    '  col *= mix(0.55, 1.0, smoothstep(0.0, 0.20, 1.0 - abs(el.x)));',
-
-    // Wet catchlight, tracking the same light as the skin.
-    '  vec3 L = normalize(vec3(uLook * 1.1 + vec2(0.18, 0.42), 0.58));',
-    '  vec3 V = normalize(vec3(-p * 0.35, 1.4));',
-    '  vec3 Rr = reflect(-L, Ne);',
-    '  float sp = max(dot(Rr, V), 0.0);',
-    '  float cat = pow(sp, 240.0) * 1.6 + pow(sp, 28.0) * 0.22;',
-    '  vec2 off = e - vec2(0.34, 0.30);',
-    '  cat += smoothstep(0.20, 0.0, length(off)) * 0.16;',        // fake window glint
-    '  col += vec3(1.0, 0.97, 0.92) * cat * step(r2, 1.0) * (1.0 - uBlink);',
-
-    // Tear film along the lower lid.
-    '  col += vec3(0.7, 0.62, 0.5) * smoothstep(0.14, 0.0, abs(el.y - lower)) * 0.12;',
-
-    '  return col;',
-    '}',
-
-    /* -------- red smoke wordmark -------- */
-    'vec3 smoke(vec2 p, out float glow) {',
-    '  vec2 uv = (p - uTextRect.xy) / uTextRect.zw * 0.5 + 0.5;',
-    '  glow = 0.0;',
-    '  if (uv.x < -0.35 || uv.x > 1.35 || uv.y < -0.35 || uv.y > 1.35) return vec3(0.0);',
-
-    '  float t = uT;',
-    '  vec2 w1 = vec2(fbm2(uv * 3.0 + vec2(0.0, -t * 0.09)),',
-    '                 fbm2(uv * 3.0 + vec2(5.3, -t * 0.11) + 17.0));',
-    '  vec2 w2 = vec2(fbm2(uv * 7.5 + w1 * 1.4 - vec2(0.0, t * 0.22)),',
-    '                 fbm2(uv * 7.5 + w1 * 1.4 + vec2(9.1, -t * 0.26)));',
-    '  vec2 warp = (w1 - 0.5) * 0.022 + (w2 - 0.5) * 0.008;',
-    '  warp.y *= 1.0 + 1.8 * (1.0 - uv.y);',                      // disperses upward
-    // A coherent wave on top of the boil. Noise alone reads as slow static.
-    '  warp.x += 0.006 * sin(uv.y * 6.0 - t * 1.1);',
-
-    // Fake 3D: taps along an extrusion vector that swings with the look
-    // direction, darkening with depth to give the side walls.
-    '  vec2 ext = normalize(vec2(uLook.x * 0.6 + 0.12, 0.55)) * 0.014;',
-    '  vec3 body = vec3(0.0);',
-    '  for (int i = 1; i <= 8; i++) {',
-    '    float f = float(i) / 8.0;',
-    '    float cB = texture2D(uText, uv + warp * (0.35 + 0.65 * f) + ext * f).b;',
-    '    body += cB * mix(vec3(0.55, 0.05, 0.02), vec3(0.10, 0.005, 0.0), f) * (1.0 - f);',
-    '  }',
-
-    '  float core = texture2D(uText, uv + warp).r;',
-    '  float g0 = texture2D(uText, uv + warp * 1.6).g;',
-    '  float g1 = texture2D(uText, uv + warp * 2.6 + vec2(0.0, -0.010)).g;',
-    '  float g2 = texture2D(uText, uv + warp * 4.0 + vec2(0.0, -0.026)).g;',
-
-    // Erosion, with a floor. Full erosion looks great on a desktop and
-    // destroys legibility on a phone, and the words are the whole point.
-    '  core *= mix(0.70, 1.0, smoothstep(0.25, 0.75, fbm2(uv * 14.0 + vec2(0.0, t * 0.35))));',
-
-    '  float flick = 1.0 + 0.06 * sin(t * 3.1) + 0.03 * (vnoise(vec2(t * 11.0, 0.0)) - 0.5);',
-
-    // Keep green low. The tonemap compresses the red channel hard, so any
-    // appreciable green survives it and the whole wordmark turns pink.
-    '  vec3 col = vec3(1.00, 0.055, 0.020) * pow(core, 0.65) * 3.4',
-    '           + vec3(1.00, 0.42, 0.30) * pow(core, 8.0) * 0.22',      // white-hot centre
-    '           + vec3(1.00, 0.030, 0.010) * (g0 * 1.4 + g1 * 0.75 + g2 * 0.40)',
-    '           + body * 1.3;',
-    '  col *= flick;',
-
-    // The warp pushes uv past the atlas edge, where CLAMP_TO_EDGE would
-    // smear the border texels into a visible rectangle. Fade them out.
-    '  vec2 fd = smoothstep(vec2(0.0), vec2(0.05), uv) * smoothstep(vec2(1.0), vec2(0.95), uv);',
-    '  float edge = fd.x * fd.y;',
-    '  col *= edge;',
-
-    '  glow = clamp(core * 1.4 + g0 * 1.0 + g1 * 0.5, 0.0, 2.5) * edge;',
-    '  return col;',
-    '}',
-
-    'void main() {',
-    '  float mn = min(uRes.x, uRes.y);',
-    // Normalise by the SHORT axis. Dividing by height squeezes the wordmark
-    // into x in [-0.23, 0.23] on a 390x844 phone and it stops being legible.
-    '  vec2 p = (gl_FragCoord.xy - 0.5 * uRes) / mn;',
-    '  p += uLook * 0.010;',                                      // scene breathes as one
-
-    '  float R = 0.150;',
-    '  vec2 cL = vec2(-0.225, 0.16);',
-    '  vec2 cR = vec2( 0.225, 0.16);',
-
-    '  float NoL; vec3 N;',
-    '  vec3 col = skin(p, NoL, N);',
-
-    // Raised rim of enlarged supraocular scales, so the eyes sit *in* the
-    // hide instead of on top of it.
-    '  float rim = max(smoothstep(1.55, 1.0, length((p - cL) / vec2(0.166, 0.111))),',
-    '                  smoothstep(1.55, 1.0, length((p - cR) / vec2(0.166, 0.111))));',
-    '  col *= mix(1.0, 0.62, rim);',
-    '  col += col * rim * 0.35 * max(N.y, 0.0);',
-
-    '  float covL, covR;',
-    '  vec3 eL = eye(p, cL, R, uGazeL, -1.0, covL);',
-    '  vec3 eR = eye(p, cR, R, uGazeR,  1.0, covR);',
-    '  col = mix(col, eL, covL);',
-    '  col = mix(col, eR, covR);',
-
-    '  float glow;',
-    '  vec3 txt = smoke(p, glow);',
-    // Bleed red light onto the hide before compositing, so the beads under
-    // the words are genuinely lit rather than having a decal laid over them.
-    '  col += glow * vec3(0.5, 0.06, 0.03) * NoL * 0.6;',
-    '  col += txt;',
-
-    // Vignette, filmic-ish curve, and a little dither to kill banding.
-    '  col *= 1.0 - 0.44 * smoothstep(0.38, 1.20, length(p * vec2(1.0, 0.85)));',
-    '  col = col / (col + 0.72) * 1.35;',
-    '  col = pow(max(col, 0.0), vec3(0.4545));',
-    '  col += (hash12(gl_FragCoord.xy) - 0.5) / 255.0;',
-    '  col *= uIntro;',
-
-    '  gl_FragColor = vec4(col, 1.0);',
-    '}'
-  ].join('\n');
-
-  /* ------------------------------------------------------------------ */
-  /* GL helpers                                                          */
-  /* ------------------------------------------------------------------ */
-
-  function getContext(canvas) {
-    var opts = {
-      alpha: false, antialias: false, depth: false, stencil: false,
-      preserveDrawingBuffer: false, powerPreference: 'high-performance',
-      desynchronized: true, failIfMajorPerformanceCaveat: false
-    };
-    var gl = null, i, names = ['webgl', 'experimental-webgl'];
-    for (i = 0; i < names.length && !gl; i++) {
-      // Some browsers throw here rather than returning null.
-      try { gl = canvas.getContext(names[i], opts); } catch (e) { gl = null; }
-    }
-    return gl;
+  function noise1(x, seed) {
+    var i = Math.floor(x), f = x - i;
+    var u = f * f * (3 - 2 * f);
+    return lerp(hash1(i + seed * 57.31), hash1(i + 1 + seed * 57.31), u) * 2 - 1;
   }
 
-  /* Extension directives must precede every non-preprocessor token, so the
-     prefix goes on ahead of the precision block rather than inside it. */
-  function buildFrag(gl) {
-    var prefix = '';
-    if (gl.getExtension('OES_standard_derivatives')) {
-      prefix = '#extension GL_OES_standard_derivatives : enable\n#define HAS_DERIV 1\n';
-    }
-    return prefix + FRAG;
+  function fbm1(x, seed) {
+    return noise1(x, seed) * 0.60 +
+      noise1(x * 2.17 + 3.7, seed + 11) * 0.27 +
+      noise1(x * 4.61 + 9.1, seed + 23) * 0.13;
   }
 
-  function compile(gl, type, src) {
+  function hash2(x, y) {
+    var s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453123;
+    return s - Math.floor(s);
+  }
+
+  function noise2(x, y) {
+    var ix = Math.floor(x), iy = Math.floor(y);
+    var fx = x - ix, fy = y - iy;
+    var ux = fx * fx * (3 - 2 * fx), uy = fy * fy * (3 - 2 * fy);
+    return lerp(
+      lerp(hash2(ix, iy), hash2(ix + 1, iy), ux),
+      lerp(hash2(ix, iy + 1), hash2(ix + 1, iy + 1), ux),
+      uy) * 2 - 1;
+  }
+
+  function fbm2(x, y) {
+    return noise2(x, y) * 0.55 + noise2(x * 2.1 + 5.2, y * 2.1 + 1.3) * 0.28 +
+      noise2(x * 4.3 + 9.1, y * 4.3 + 7.7) * 0.17;
+  }
+
+  /* ================================================================== */
+  /* 2. GL helpers                                                       */
+  /* ================================================================== */
+
+  function compile(gl, type, src, label) {
     var sh = gl.createShader(type);
     gl.shaderSource(sh, src);
     gl.compileShader(sh);
     if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
-      if (window.console) console.warn('kwadzilla-splash: ' + gl.getShaderInfoLog(sh));
+      var log = gl.getShaderInfoLog(sh);
       gl.deleteShader(sh);
-      return null;
+      throw new Error('kwadzilla: ' + label + ' failed to compile\n' + log);
     }
     return sh;
   }
 
-  function link(gl, vsSrc, fsSrc) {
-    var vs = compile(gl, gl.VERTEX_SHADER, vsSrc);
-    var fs = compile(gl, gl.FRAGMENT_SHADER, fsSrc);
-    if (!vs || !fs) return null;
-    var prog = gl.createProgram();
-    gl.attachShader(prog, vs);
-    gl.attachShader(prog, fs);
-    gl.linkProgram(prog);
+  function program(gl, vsSrc, fsSrc, label) {
+    var vs = compile(gl, gl.VERTEX_SHADER, vsSrc, label + ' vertex');
+    var fs = compile(gl, gl.FRAGMENT_SHADER, fsSrc, label + ' fragment');
+    var pr = gl.createProgram();
+    gl.attachShader(pr, vs);
+    gl.attachShader(pr, fs);
+    gl.linkProgram(pr);
     gl.deleteShader(vs);
     gl.deleteShader(fs);
-    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
-      if (window.console) console.warn('kwadzilla-splash: ' + gl.getProgramInfoLog(prog));
-      gl.deleteProgram(prog);
-      return null;
+    if (!gl.getProgramParameter(pr, gl.LINK_STATUS)) {
+      var log = gl.getProgramInfoLog(pr);
+      gl.deleteProgram(pr);
+      throw new Error('kwadzilla: ' + label + ' failed to link\n' + log);
     }
-    return prog;
+    /* Cache uniform locations up front — there are enough of them that
+       per-frame getUniformLocation would show up in a profile. */
+    pr.u = {};
+    var n = gl.getProgramParameter(pr, gl.ACTIVE_UNIFORMS), i, info;
+    for (i = 0; i < n; i++) {
+      info = gl.getActiveUniform(pr, i);
+      pr.u[info.name.replace(/\[0\]$/, '')] = gl.getUniformLocation(pr, info.name);
+    }
+    return pr;
   }
 
-  /* ------------------------------------------------------------------ */
-  /* Input                                                               */
-  /* ------------------------------------------------------------------ */
+  /* ================================================================== */
+  /* 3. The face                                                         */
+  /* ================================================================== */
+  /*
+   * Metres, at life size for a big monitor lizard, because the scale sizes
+   * and the lighting are both tuned against real dimensions.
+   *
+   * Space: +X right, +Y up, +Z towards the viewer. The skin sits around
+   * z = 0 and the camera looks down -Z. There is no head — the slab simply
+   * runs past the edge of any frame that can be put in front of it.
+   */
 
-  /* One normalised `look` vector drives everything downstream: the light
-     direction, both parallax layers, the text extrusion, the scene breathe
-     and the point the eyes verge on. */
-  function createInput(root, onFirstTilt) {
-    var S = {
-      raw: { x: 0, y: 0 },
-      look: { x: 0, y: 0 },
-      vel: { x: 0, y: 0 },
-      mode: 'idle',
-      lastInput: 0,
-      lastTouch: -1e9,
-      tiltOK: false,
-      restBeta: null,
-      idleMix: 1
+  var EYE_SEP = 0.0720;         // centre to centre
+  var EYE_R = 0.0168;           // globe radius
+  var SLAB_W = 0.34;            // skin extent, comfortably past every frame
+  var SLAB_H = 0.34;
+  var SLAB_NX = 176;            // grid resolution: carries the large forms
+  var SLAB_NY = 176;            // only — the scales are a normal map
+
+  /* Cells baked across one repeat of the scale map. The skin shader turns
+     a scale size in metres into a repeat count through this, so it has to
+     match N in the bake shader. */
+  var CELLS_PER_REPEAT = 20.0;
+
+  /*
+   * Height of the skin above z = 0 at (x, y), and the whole reason the
+   * page reads as an animal rather than as a tiled texture. Flat skin lit
+   * from one side is wallpaper; it needs a brow to cast into the socket
+   * and a ridge down the middle to catch the key.
+   */
+  function skinHeight(x, y) {
+    var z = 0;
+    var ex = Math.abs(x) - EYE_SEP * 0.5;   // distance from the eye axis
+
+    /* The broad dome of a skull, falling away at every edge. */
+    z -= x * x * 1.15 + y * y * 0.85;
+
+    /* The ridge running down between the eyes, on towards a snout that is
+       off the bottom of the frame. */
+    z += 0.0125 * gauss(x, 0.034) * smoothstep(0.075, -0.02, y);
+
+    /* Brow shelf over each socket — heavy, and overhanging enough that the
+       key light has something to bite on. */
+    z += 0.0150 * gauss(ex, 0.030) * gauss(y - 0.0175, 0.0135);
+    /* ...carried outboard into a temporal ridge. */
+    z += 0.0060 * gauss(Math.abs(x) - EYE_SEP * 0.5 - 0.030, 0.026) * gauss(y - 0.004, 0.030);
+
+    /* The socket itself. */
+    z -= 0.0160 * gauss(ex, 0.0150) * gauss(y, 0.0132);
+
+    /* Loose folds under the eye, and the crease where the brow ends. */
+    z -= 0.0028 * gauss(ex, 0.026) * gauss(y + 0.0215, 0.0052);
+    z -= 0.0020 * gauss(ex, 0.030) * gauss(y - 0.0330, 0.0048);
+
+    /* Lumps. Skin is never a mathematical surface. */
+    z += fbm2(x * 26.0, y * 26.0) * 0.0022;
+    z += fbm2(x * 62.0 + 11.0, y * 62.0 + 7.0) * 0.0007;
+    return z;
+  }
+
+  /*
+   * Blend between the shader's fine and coarse scale rates: 0 is fine, 1
+   * is coarse. Small scales crowd around the eye and open out towards the
+   * edges of the frame, which is the gradation a real head has.
+   */
+  function scaleBlendAt(x, y) {
+    var ex = Math.abs(x) - EYE_SEP * 0.5;
+    var d = Math.sqrt(ex * ex + y * y);
+    var b = smoothstep(0.012, 0.090, d);
+    /* The ring of enlarged shields monitors carry around the socket. */
+    b = Math.min(1, b + 0.45 * gauss(d - 0.026, 0.011));
+    return b;
+  }
+
+  /* Where a globe sits: on the socket floor, backed off far enough that it
+     stands slightly proud of the rim around it. */
+  function eyeCentre(side) {
+    var x = side * EYE_SEP * 0.5;
+    return [x, 0, skinHeight(x, 0) - EYE_R * 0.56];
+  }
+
+  /* Region ids, matched in the fragment shader. */
+  var R_SKIN = 0, R_LID = 1, R_SOCKET = 2;
+
+  /* ================================================================== */
+  /* 4. Meshing                                                          */
+  /* ================================================================== */
+
+  /*
+   * pos(3) nrm(3) tan(3) uv(2) size(1) region(1) = 13 floats.
+   *
+   * uv is in metres along the surface, so a scale is the same physical
+   * size on the slab and on the lids without any per-object fiddling.
+   * tan is the surface tangent the normal map is applied along.
+   */
+  var STRIDE = 13;
+
+  function Soup() {
+    this.v = [];
+    this.idx = [];
+  }
+
+  Soup.prototype.vert = function (p, n, t, u, size, region) {
+    this.v.push(p[0], p[1], p[2], n[0], n[1], n[2], t[0], t[1], t[2],
+      u[0], u[1], size, region);
+    return this.v.length / STRIDE - 1;
+  };
+
+  Soup.prototype.quad = function (a, b, c, d) {
+    this.idx.push(a, b, c, a, c, d);
+  };
+
+  Soup.prototype.finish = function () {
+    return {
+      data: new Float32Array(this.v),
+      index: new Uint32Array(this.idx),
+      count: this.idx.length
     };
+  };
 
-    var btn = null;
+  /* ---- the slab ---------------------------------------------------- */
 
-    function setRaw(x, y, mode) {
-      S.raw.x = clamp(x, -1, 1);
-      S.raw.y = clamp(y, -1, 1);
-      S.mode = mode;
-      S.lastInput = Date.now();
+  function buildSkin(soup) {
+    var nx = SLAB_NX, ny = SLAB_NY, i, j;
+    var grid = [];
+    var d = 0.0006;   // step for the numerical normal
+
+    for (j = 0; j <= ny; j++) {
+      var row = [];
+      var y = lerp(-SLAB_H * 0.5, SLAB_H * 0.5, j / ny);
+      for (i = 0; i <= nx; i++) {
+        var x = lerp(-SLAB_W * 0.5, SLAB_W * 0.5, i / nx);
+        var z = skinHeight(x, y);
+        /* Normal from central differences on the height field. Cheaper to
+           reason about than averaging face normals, and cleaner. */
+        var zx = (skinHeight(x + d, y) - skinHeight(x - d, y)) / (2 * d);
+        var zy = (skinHeight(x, y + d) - skinHeight(x, y - d)) / (2 * d);
+        var n = v3norm([-zx, -zy, 1]);
+        var t = v3norm([1, 0, zx]);
+        var ex = Math.abs(x) - EYE_SEP * 0.5;
+        var inSocket = gauss(ex, 0.019) * gauss(y, 0.017);
+        row.push(soup.vert([x, y, z], n, t, [x, y], scaleBlendAt(x, y),
+          inSocket > 0.55 ? R_SOCKET : R_SKIN));
+      }
+      grid.push(row);
+    }
+
+    for (j = 0; j < ny; j++) {
+      for (i = 0; i < nx; i++) {
+        soup.quad(grid[j][i], grid[j][i + 1], grid[j + 1][i + 1], grid[j + 1][i]);
+      }
+    }
+  }
+
+  /* ---- a globe ----------------------------------------------------- */
+  /*
+   * Built in its own space with +Z as the gaze direction, so the fragment
+   * shader reads the angle straight off the local position and the
+   * object's rotation is the whole of its aim.
+   */
+  function buildGlobe(soup) {
+    var RINGS = 40, SEGS = 56, i, j;
+    var grid = [];
+    for (i = 0; i <= RINGS; i++) {
+      var row = [];
+      var polar = (i / RINGS) * PI;
+      for (j = 0; j <= SEGS; j++) {
+        var az = (j / SEGS) * TAU;
+        var dir = [
+          Math.sin(polar) * Math.cos(az),
+          Math.sin(polar) * Math.sin(az),
+          Math.cos(polar)
+        ];
+        row.push(soup.vert(v3mul(dir, EYE_R), dir, [1, 0, 0],
+          [j / SEGS, i / RINGS], 0.001, 0));
+      }
+      grid.push(row);
+    }
+    /* Polar first, then azimuth: the other order winds the sphere inside
+       out and the whole globe gets back-face culled, which looks exactly
+       like an eye that will not light. */
+    for (i = 0; i < RINGS; i++) {
+      for (j = 0; j < SEGS; j++) {
+        soup.quad(grid[i][j], grid[i + 1][j], grid[i + 1][j + 1], grid[i][j + 1]);
+      }
+    }
+  }
+
+  /* ---- a lid ------------------------------------------------------- */
+  /*
+   * A spherical cap sitting just proud of the globe, in the globe's own
+   * space. Rolling it about the lateral axis opens and closes the eye.
+   * `sign` picks upper or lower.
+   */
+  function buildLid(soup, sign) {
+    var R = EYE_R * 1.055;
+    var RINGS = 18, SEGS = 44, i, j;
+    var grid = [];
+    for (i = 0; i <= RINGS; i++) {
+      var row = [];
+      var spread = (i / RINGS) * 1.34;      // radians from the lid's pole
+      for (j = 0; j <= SEGS; j++) {
+        var az = (j / SEGS) * TAU;
+        var dir = v3norm([
+          Math.sin(spread) * Math.cos(az),
+          sign * Math.cos(spread),
+          Math.sin(spread) * Math.sin(az)
+        ]);
+        /* Tangent along the sweep, so the scales run round the lid the way
+           they run round a real eyelid. */
+        var tan = v3cross([0, sign, 0], dir);
+        tan = v3len(tan) > 0.25 ? v3norm(tan) : [1, 0, 0];
+        row.push(soup.vert(v3mul(dir, R), dir, tan,
+          [az * R, spread * R], 0.0, R_LID));
+      }
+      grid.push(row);
+    }
+    for (i = 0; i < RINGS; i++) {
+      for (j = 0; j < SEGS; j++) {
+        if (sign > 0) {
+          soup.quad(grid[i][j], grid[i][j + 1], grid[i + 1][j + 1], grid[i + 1][j]);
+        } else {
+          soup.quad(grid[i][j], grid[i + 1][j], grid[i + 1][j + 1], grid[i][j + 1]);
+        }
+      }
+    }
+  }
+
+  function buildAll() {
+    var skin = new Soup(); buildSkin(skin);
+    var globe = new Soup(); buildGlobe(globe);
+    var lidUp = new Soup(); buildLid(lidUp, 1);
+    var lidLo = new Soup(); buildLid(lidLo, -1);
+    return {
+      skin: skin.finish(),
+      globe: globe.finish(),
+      lidUp: lidUp.finish(),
+      lidLo: lidLo.finish()
+    };
+  }
+
+  /* ================================================================== */
+  /* 5. Shaders                                                          */
+  /* ================================================================== */
+
+  var GLSL_COMMON = [
+    'float hash12(vec2 p){ vec3 q = fract(vec3(p.xyx)*0.1031); q += dot(q, q.yzx+33.33); return fract((q.x+q.y)*q.z); }',
+    'vec2 hash22(vec2 p){ vec3 q = fract(vec3(p.xyx)*vec3(0.1031,0.1030,0.0973));',
+    '  q += dot(q, q.yzx+33.33); return fract((q.xx+q.yz)*q.zy); }',
+    'float vnoise(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f);',
+    '  return mix(mix(hash12(i), hash12(i+vec2(1,0)), f.x),',
+    '             mix(hash12(i+vec2(0,1)), hash12(i+vec2(1,1)), f.x), f.y); }',
+    'float fbm(vec2 p){ float s = 0.0, a = 0.5; for(int i=0;i<4;i++){ s += a*vnoise(p); p *= 2.03; a *= 0.5; } return s; }'
+  ].join('\n');
+
+  var FULLSCREEN_VS = [
+    '#version 300 es',
+    'void main(){',
+    '  vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);',
+    '  gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);',
+    '}'
+  ].join('\n');
+
+  /* ---- scale bake -------------------------------------------------- */
+  /*
+   * Rendered once into a tiling map. Storing the gradient rather than the
+   * height means the skin shader gets its bump from a single tap.
+   *
+   *   rg = relief gradient   b = per-scale random   a = seam mask
+   */
+  var BAKE_FS = [
+    '#version 300 es',
+    'precision highp float;',
+    'out vec4 fragColor;',
+    'uniform vec2 uSize;',
+    GLSL_COMMON,
+    'const float N = 20.0;',
+    /* Distance to the two nearest jittered cell centres on a grid of n
+       cells, wrapped so the result tiles. Returns (f1, f2, cell id). */
+    'vec3 cellF(vec2 uv, float n, float squash){',
+    '  vec2 g = uv * n;',
+    '  vec2 gi = floor(g), gf = fract(g);',
+    '  float f1 = 8.0, f2 = 8.0; vec2 best = vec2(0.0);',
+    '  for(int y=-1;y<=1;y++) for(int x=-1;x<=1;x++){',
+    '    vec2 o = vec2(float(x), float(y));',
+    '    vec2 cell = mod(gi + o, vec2(n));',
+    '    vec2 j = hash22(cell);',
+    '    vec2 r = o + 0.10 + j*0.80 - gf;',
+    '    float d = length(r * vec2(1.0, squash));',
+    '    if(d < f1){ f2 = f1; f1 = d; best = cell; }',
+    '    else if(d < f2){ f2 = d; }',
+    '  }',
+    '  return vec3(f1, f2, hash12(best));',
+    '}',
+    '',
+    /*
+     * Scale relief. The shape matters more than the size: sharpening the
+     * cell partition gives flat-topped cells with hard edges, which shades
+     * like cut glass. A smoothstep is flat at the seam AND flat at the
+     * centre, so each scale leaves and rejoins its neighbours with zero
+     * gradient and reads as a rounded, overlapping shingle.
+     *
+     * Three layers — the scales, a pebbling within each, and a micro grain
+     * that never resolves but keeps the specular from looking swept.
+     */
+    'float relief(vec2 uv){',
+    '  vec3 c = cellF(uv, N, 1.22);',
+    '  float t = clamp((c.y - c.x) * 1.75, 0.0, 1.0);',
+    '  float h = t * t * (3.0 - 2.0 * t);',
+    '  h += (c.z - 0.5) * 0.20;',
+    '  vec3 p = cellF(uv, N * 3.0, 1.05);',
+    '  float pt = clamp((p.y - p.x) * 2.0, 0.0, 1.0);',
+    '  h += (pt * pt * (3.0 - 2.0 * pt) - 0.5) * 0.16;',
+    '  h += (cellF(uv, N * 9.0, 1.0).z - 0.5) * 0.05;',
+    '  return h;',
+    '}',
+    'void main(){',
+    '  vec2 uv = gl_FragCoord.xy / uSize;',
+    '  vec2 e = 1.0 / uSize;',
+    '  float hx = relief(uv + vec2(e.x, 0.0)) - relief(uv - vec2(e.x, 0.0));',
+    '  float hy = relief(uv + vec2(0.0, e.y)) - relief(uv - vec2(0.0, e.y));',
+    '  vec2 grad = vec2(hx, hy) / (2.0 * e.x);',
+    '  vec3 c = cellF(uv, N, 1.22);',
+    '  float seam = 1.0 - smoothstep(0.0, 0.055, c.y - c.x);',
+    /* GMAX brackets the steepest slope a scale edge produces. Encode
+       tighter and every edge clips to the same value, which shades like
+       polished plastic. */
+    '  const float GMAX = N * 3.4;',
+    '  fragColor = vec4(clamp(grad / GMAX * 0.5 + 0.5, 0.0, 1.0), c.z, seam);',
+    '}'
+  ].join('\n');
+
+  /* ---- lighting, shared ------------------------------------------- */
+  /*
+   * One hard key from above and to the left, a cold bounce from the lower
+   * right, and a cool edge from behind. Deliberately not an open studio:
+   * the brow has to throw a real shadow into the socket, because that
+   * shadow is most of what makes a stare read as a threat rather than as
+   * a portrait.
+   */
+  var GLSL_LIGHT = [
+    'const vec3 L_KEY  = vec3(-0.4900,  0.7300,  0.4760);',
+    'const vec3 L_FILL = vec3( 0.7400, -0.3600,  0.5680);',
+    'const vec3 L_RIM  = vec3( 0.2600,  0.6100, -0.7480);',
+    'const vec3 C_KEY  = vec3(1.000, 0.972, 0.930) * 2.30;',
+    'const vec3 C_FILL = vec3(0.760, 0.830, 1.000) * 0.260;',
+    'const vec3 C_RIM  = vec3(0.840, 0.900, 1.000) * 0.420;',
+    'const vec3 C_SKY  = vec3(0.780, 0.850, 1.000) * 0.200;',
+    'const vec3 C_GND  = vec3(1.000, 0.940, 0.870) * 0.120;',
+    '',
+    'float ggx(vec3 n, vec3 v, vec3 l, float rough){',
+    '  vec3 h = normalize(v + l);',
+    '  float a = max(1e-3, rough*rough);',
+    '  float nh = max(dot(n,h), 0.0);',
+    '  float d = a*a / (3.14159265 * pow(nh*nh*(a*a-1.0)+1.0, 2.0));',
+    '  float nv = max(dot(n,v), 1e-4), nl = max(dot(n,l), 1e-4);',
+    '  float k = a*0.5;',
+    '  float g = (nl/(nl*(1.0-k)+k)) * (nv/(nv*(1.0-k)+k));',
+    '  return d * g / (4.0*nv*nl) * nl;',
+    '}',
+    '',
+    'vec3 hemi(vec3 n){ return mix(C_GND, C_SKY, n.y*0.5+0.5); }',
+    '',
+    /* The scene target is 8-bit, so radiance is brought into range here
+       rather than in the post pass — write raw HDR into it and everything
+       above one clips to the same flat value. */
+    'vec3 tonemap(vec3 x){ return 1.0 - exp(-max(x, vec3(0.0))); }'
+  ].join('\n');
+
+  /*
+   * Occlusion from the two sockets, evaluated analytically.
+   *
+   * Everything that shades here is either in a socket, on the rim of one,
+   * or on a lid inside one, and the sockets are two known pits in known
+   * places. So rather than approximating geometry with spheres, ask the
+   * height field directly: how far down the pit is this point, and how
+   * much brow sits between it and the key.
+   */
+  var GLSL_SOCKET = [
+    'uniform vec2 uSocket;',      // half-separation, socket radius
+    '',
+    'float socketDepth(vec3 p){',
+    '  float ex = abs(p.x) - uSocket.x;',
+    '  float d = length(vec2(ex, p.y)) / uSocket.y;',
+    '  return 1.0 - smoothstep(0.55, 1.35, d);',
+    '}',
+    '',
+    /* A pit occludes the sky in proportion to how deep in it you are. */
+    'float socketAO(vec3 p, vec3 n){',
+    '  float depth = socketDepth(p);',
+    '  float up = n.y * 0.5 + 0.5;',
+    '  return 1.0 - depth * (0.34 - 0.16 * up);',
+    '}',
+    '',
+    /* The brow sits above and the key comes from above, so the shadow is
+       deepest at the top of the socket and lifts towards the bottom. */
+    'float browShadow(vec3 p){',
+    '  float ex = abs(p.x) - uSocket.x;',
+    '  float r = length(vec2(ex, p.y)) / uSocket.y;',
+    '  float inPit = 1.0 - smoothstep(0.35, 1.45, r);',
+    '  float high = smoothstep(-1.4, 1.1, p.y / uSocket.y);',
+    '  return 1.0 - inPit * high * 0.50;',
+    '}'
+  ].join('\n');
+
+  /* ---- skin -------------------------------------------------------- */
+
+  var SKIN_VS = [
+    '#version 300 es',
+    'precision highp float;',
+    'in vec3 aPos;',
+    'in vec3 aNrm;',
+    'in vec3 aTan;',
+    'in vec2 aUV;',
+    'in float aSize;',
+    'in float aRegion;',
+    'uniform mat4 uVP;',
+    'uniform mat4 uModel;',
+    'uniform mat3 uModelN;',
+    'out vec3 vW;',
+    'out vec3 vN;',
+    'out vec3 vT;',
+    'out vec2 vUV;',
+    'out float vSize;',
+    'flat out int vRegion;',
+    'void main(){',
+    '  vec4 w = uModel * vec4(aPos, 1.0);',
+    '  vW = w.xyz;',
+    '  vN = normalize(uModelN * aNrm);',
+    '  vT = normalize(uModelN * aTan);',
+    '  vUV = aUV;',
+    '  vSize = aSize;',
+    '  vRegion = int(aRegion + 0.5);',
+    '  gl_Position = uVP * w;',
+    '}'
+  ].join('\n');
+
+  var SKIN_FS = [
+    '#version 300 es',
+    'precision highp float;',
+    'in vec3 vW;',
+    'in vec3 vN;',
+    'in vec3 vT;',
+    'in vec2 vUV;',
+    'in float vSize;',
+    'flat in int vRegion;',
+    'uniform vec3 uEye;',
+    'uniform sampler2D uScales;',
+    'uniform float uIsLid;',
+    'out vec4 fragColor;',
+    'const float CELLS_PER_REPEAT = 20.0;',
+    'const float SCALE_FINE = 0.00230;',
+    'const float SCALE_COARSE = 0.00520;',
+    'const float LID_EDGE = 0.0168 * 1.055 * 1.34;',
+    GLSL_COMMON,
+    GLSL_LIGHT,
+    GLSL_SOCKET,
+    '',
+    'void main(){',
+    '  vec3 n = normalize(vN);',
+    '  vec3 t = normalize(vT - n * dot(n, vT));',
+    '  vec3 b = cross(n, t);',
+    '  vec3 v = normalize(uEye - vW);',
+    '',
+    /*
+     * Two fixed frequencies, blended.
+     *
+     * The obvious way to vary scale size across a surface is to vary the
+     * lookup frequency with position — and it does not work: multiplying a
+     * coordinate by a field that itself changes with that coordinate is
+     * not a parameterisation, it is a shear, and the texture comes out
+     * smeared into streaks radiating from wherever the frequency changes
+     * fastest. Sampling twice at constant rates and mixing gives the same
+     * gradation with none of that.
+     */
+    '  float fine = vRegion == 1 ? SCALE_FINE * 0.45 : SCALE_FINE;',
+    '  vec2 uvF = vUV / (fine * CELLS_PER_REPEAT);',
+    '  vec2 uvC = vUV / (SCALE_COARSE * CELLS_PER_REPEAT);',
+    '  vec4 s = mix(texture(uScales, uvF), texture(uScales, uvC), vSize);',
+    '  vec2 g = s.rg * 2.0 - 1.0;',
+    '  float bump = vRegion == 1 ? 0.14 : 0.46;',
+    '  n = normalize(n - bump * (t * g.x + b * g.y));',
+    '',
+    /* ---- colour ---- */
+    /* Dark olive over charcoal, mottled, with the pale flecks a monitor
+       carries and a darker wash down in the sockets. */
+    '  float mott = fbm(vUV * 46.0);',
+    '  float blotch = fbm(vUV * 13.0 + 21.0);',
+    '  vec3 base = mix(vec3(0.052, 0.056, 0.046), vec3(0.088, 0.090, 0.072),',
+    '                  smoothstep(0.35, 0.75, blotch));',
+    '  base *= 0.74 + 0.52 * mott;',
+    '  float fleck = smoothstep(0.62, 0.86, fbm(vUV * 120.0 + 7.0));',
+    '  base = mix(base, vec3(0.190, 0.172, 0.112), fleck * 0.45);',
+    /* Per-scale variation, then darken the seams between them. */
+    '  base *= 0.82 + 0.36 * s.b;',
+    '  base *= mix(0.42, 1.0, smoothstep(0.0, 0.6, 1.0 - s.a));',
+    '',
+    '  float rough = clamp(0.60 + (s.b - 0.5) * 0.26, 0.16, 0.95);',
+    '  float spec = 1.0;',
+    '',
+    '  if(vRegion == 2){',
+    /* Socket floor: darker, tighter skin. */
+    '    base *= 0.62;',
+    '    rough = clamp(rough - 0.10, 0.16, 0.95);',
+    '  }',
+    '  if(vRegion == 1){',
+    '    base = mix(base, vec3(0.046, 0.048, 0.040), 0.55);',
+    /* Lid. Darker still, and wet along the margin where it meets the
+       globe — that thin bright line is most of what says "eye" rather
+       than "hole in some skin". */
+    '    base *= 0.72;',
+    '    float margin = smoothstep(0.70, 1.0, vUV.y / LID_EDGE);',
+    '    base *= mix(1.0, 0.16, margin);',
+    '    rough = mix(rough, 0.13, margin * 0.9);',
+    '    spec = mix(1.0, 3.4, margin);',
+    '  }',
+    '',
+    /* ---- light ---- */
+    '  float ao = socketAO(vW, n) * mix(1.0, 0.70, s.a);',
+    '  float sh = browShadow(vW);',
+    '',
+    '  float wrap = 0.22;',
+    '  float nlK = max(0.0, (dot(n, L_KEY) + wrap) / (1.0 + wrap));',
+    '  float nlF = max(0.0, (dot(n, L_FILL) + wrap) / (1.0 + wrap));',
+    '  float nlR = max(0.0, dot(n, L_RIM));',
+    '',
+    '  vec3 diff = C_KEY * nlK * sh + C_FILL * nlF + C_RIM * nlR * 0.5;',
+    '  diff += hemi(n);',
+    '  diff *= ao;',
+    '',
+    '  float f0 = 0.045;',
+    '  float fres = f0 + (1.0 - f0) * pow(1.0 - max(dot(n, v), 0.0), 5.0);',
+    '  vec3 sp = (C_KEY * ggx(n, v, L_KEY, rough) * sh',
+    '           + C_FILL * ggx(n, v, L_FILL, rough) * 1.6',
+    '           + C_RIM * ggx(n, v, L_RIM, rough) * 1.3) * fres * spec * 3.2;',
+    '  sp *= ao;',
+    '',
+    '  fragColor = vec4(tonemap(base * diff + sp), 1.0);',
+    '}'
+  ].join('\n');
+
+  /* ---- eye --------------------------------------------------------- */
+
+  var EYE_VS = [
+    '#version 300 es',
+    'precision highp float;',
+    'in vec3 aPos;',
+    'in vec3 aNrm;',
+    'uniform mat4 uVP;',
+    'uniform mat4 uModel;',
+    'uniform mat3 uModelN;',
+    'out vec3 vW;',
+    'out vec3 vN;',
+    'out vec3 vL;',
+    'void main(){',
+    '  vec4 w = uModel * vec4(aPos, 1.0);',
+    '  vW = w.xyz;',
+    '  vN = normalize(uModelN * aNrm);',
+    '  vL = aPos;',            // local, +Z is the gaze
+    '  gl_Position = uVP * w;',
+    '}'
+  ].join('\n');
+
+  var EYE_FS = [
+    '#version 300 es',
+    'precision highp float;',
+    'in vec3 vW;',
+    'in vec3 vN;',
+    'in vec3 vL;',
+    'uniform vec3 uEye;',
+    'uniform mat3 uModelT;',
+    'out vec4 fragColor;',
+    GLSL_COMMON,
+    GLSL_LIGHT,
+    GLSL_SOCKET,
+    '',
+    'void main(){',
+    '  vec3 n = normalize(vN);',
+    '  vec3 v = normalize(uEye - vW);',
+    '  vec3 d = normalize(vL);',
+    '',
+    /*
+     * Corneal refraction, faked. The iris is not on the surface of the
+     * eye: it sits a few millimetres behind a curved lens of clear tissue,
+     * and light entering off-axis bends before it reaches it. Shifting the
+     * lookup along the view direction reproduces the tell — the pupil
+     * appears to swim as the eye turns.
+     */
+    '  vec3 vLocal = normalize(uModelT * v);',     // view, in globe space
+    '  vec3 id = normalize(d - vLocal * 0.34);',
+    '  float ang = acos(clamp(id.z, -1.0, 1.0));',
+    '',
+    '  float iris = smoothstep(1.18, 1.02, ang);',
+    '  float pupil = smoothstep(0.330, 0.268, ang);',
+    '',
+    /* Radial striae and crypts. A flat disc of colour reads as a bead. */
+    '  float th = atan(id.y, id.x);',
+    '  float fib = 0.5 + 0.5 * sin(th * 74.0 + ang * 22.0);',
+    '  fib = mix(fib, hash12(vec2(floor(th * 26.0), floor(ang * 22.0))), 0.42);',
+    '  float crypt = smoothstep(0.45, 0.85, fbm(vec2(th * 7.0, ang * 16.0)));',
+    '',
+    '  vec3 irisC = mix(vec3(0.235, 0.148, 0.030), vec3(0.760, 0.582, 0.140), fib);',
+    '  irisC = mix(irisC, vec3(0.115, 0.070, 0.018), crypt * 0.55);',
+    /* Bright towards the rim, dark into the pupil, then a hard limbal ring
+       right at the edge. */
+    '  irisC *= 0.40 + 0.90 * smoothstep(0.28, 0.86, ang);',
+    '  irisC *= 1.0 - smoothstep(0.94, 1.14, ang) * 0.90;',
+    '',
+    '  vec3 sclera = vec3(0.011, 0.011, 0.010);',
+    '  vec3 albedo = mix(sclera, irisC, iris);',
+    '  albedo = mix(albedo, vec3(0.004), pupil);',
+    '',
+    /* The cornea is glass: near-mirror over the iris, duller on the sclera
+       behind the lids. */
+    '  float rough = mix(0.34, 0.045, iris);',
+    '  float ao = socketAO(vW, n);',
+    '  float sh = mix(browShadow(vW), 1.0, 0.35);',
+    '',
+    '  vec3 diff = C_KEY * max(0.0, dot(n, L_KEY)) * sh',
+    '            + C_FILL * max(0.0, dot(n, L_FILL))',
+    '            + hemi(n) * 1.4;',
+    '  diff *= ao;',
+    '',
+    '  float fres = 0.04 + 0.96 * pow(1.0 - max(dot(n, v), 0.0), 5.0);',
+    '  vec3 sp = (C_KEY * ggx(n, v, L_KEY, rough) * sh',
+    '           + C_RIM * ggx(n, v, L_RIM, rough) * 0.8',
+    '           + C_FILL * ggx(n, v, L_FILL, rough) * 0.35) * (0.04 + fres) * 17.0;',
+    '  sp *= mix(0.55, 1.0, ao) * mix(0.28, 1.0, iris);',
+    '',
+    '  fragColor = vec4(tonemap(albedo * diff + sp), 1.0);',
+    '}'
+  ].join('\n');
+
+  /* ---- post -------------------------------------------------------- */
+
+  var POST_FS = [
+    '#version 300 es',
+    'precision highp float;',
+    'uniform sampler2D uScene;',
+    'uniform vec2 uTexel;',
+    'uniform float uTime;',
+    'uniform float uGrain;',
+    'out vec4 fragColor;',
+    GLSL_COMMON,
+    'void main(){',
+    '  vec2 uv = gl_FragCoord.xy * uTexel;',
+    /* Box-downsample the supersampled scene. It is the edge of the lids
+       against the globe that gives a render away. */
+    '  vec2 o = uTexel * 0.5;',
+    '  vec3 c = texture(uScene, uv + vec2(-o.x, -o.y)).rgb',
+    '         + texture(uScene, uv + vec2( o.x, -o.y)).rgb',
+    '         + texture(uScene, uv + vec2(-o.x,  o.y)).rgb',
+    '         + texture(uScene, uv + vec2( o.x,  o.y)).rgb;',
+    '  c *= 0.25;',
+    /* A real vignette, not a token one — this is a close, dark frame and
+       the falloff is what keeps the eyes the subject. */
+    '  vec2 q = uv - 0.5;',
+    '  c *= 1.0 - dot(q, q) * 0.34;',
+    '  float g = hash12(gl_FragCoord.xy + fract(uTime) * 431.7) - 0.5;',
+    '  c += g * uGrain;',
+    '  float dth = (hash12(gl_FragCoord.xy * 0.37) - 0.5) / 255.0;',
+    '  fragColor = vec4(pow(max(c + dth, 0.0), vec3(1.0/2.2)), 1.0);',
+    '}'
+  ].join('\n');
+
+  /* ================================================================== */
+  /* 6. Behaviour                                                        */
+  /* ================================================================== */
+
+  var EYE_YAW_MAX = 0.46;
+  var EYE_PITCH_MAX = 0.34;
+
+  /*
+   * An eye is never still, and almost none of what it does is voluntary.
+   * The visitor drives where it points; everything else here happens
+   * whether they are there or not.
+   */
+  function Behaviour() {
+    this.t = 0;
+    this.yaw = 0; this.pitch = 0;
+    this.yawV = 0; this.pitchV = 0;
+    this.tgtYaw = 0; this.tgtPitch = 0;
+    this.blinkAt = 2.4; this.blink = 0; this.blinkPhase = 0; this.blinkQueue = 0;
+    /* Lids are not synchronised in life, and that offset is one of the
+       things that stops a pair of eyes reading as one object. */
+    this.blinkSkew = 0.06;
+    this.alert = 0;
+    this.damp = 1;
+  }
+
+  Behaviour.prototype.setTarget = function (yaw, pitch) {
+    var moved = Math.abs(yaw - this.tgtYaw) + Math.abs(pitch - this.tgtPitch);
+    if (moved > 0.10) this.alert = Math.min(1, this.alert + moved * 1.4);
+    this.tgtYaw = yaw;
+    this.tgtPitch = pitch;
+  };
+
+  Behaviour.prototype.step = function (dt) {
+    this.t += dt;
+
+    /* Eyes move in jumps, not sweeps. A stiff spring gets most of the way
+       there fast and settles before the overshoot reads as wobble. */
+    var k = 150.0, c = 2 * Math.sqrt(k);
+    this.yawV += (-(this.yaw - this.tgtYaw) * k - this.yawV * c) * dt;
+    this.pitchV += (-(this.pitch - this.tgtPitch) * k - this.pitchV * c) * dt;
+    this.yaw += this.yawV * dt;
+    this.pitch += this.pitchV * dt;
+
+    this.alert = Math.max(0, this.alert - dt * 0.6);
+
+    this.blinkAt -= dt;
+    if (this.blinkAt <= 0 && this.blink <= 0) {
+      this.blink = 0.001;
+      this.blinkPhase = 0;
+      /* Something watching you blinks less. */
+      this.blinkAt = lerp(2.8, 8.5, Math.random()) * lerp(1.0, 1.9, this.alert);
+      this.blinkSkew = lerp(0.03, 0.10, Math.random());
+      if (Math.random() < 0.22) this.blinkQueue = 1;
+    }
+    if (this.blink > 0) {
+      this.blinkPhase += dt / 0.19;
+      this.blink = this.blinkPhase < 1 ? 1 : 0;
+      if (this.blinkPhase >= 1) {
+        this.blink = 0;
+        if (this.blinkQueue > 0) { this.blinkQueue--; this.blinkAt = 0.20; }
+      }
+    }
+  };
+
+  /* Blink amount for one eye, offset from the other. */
+  Behaviour.prototype.blinkFor = function (side) {
+    if (this.blink <= 0) return 0;
+    var p = this.blinkPhase - (side > 0 ? this.blinkSkew : 0);
+    if (p <= 0 || p >= 1) return 0;
+    return Math.sin(p * PI);
+  };
+
+  /* Where one globe points. Both converge on the same target, which is
+     what makes it read as attention rather than as two ornaments. */
+  Behaviour.prototype.aimFor = function (side) {
+    var d = this.damp;
+    var t = this.t;
+    /* Microsaccades: tiny, fast, and never the same in both eyes. */
+    var jy = fbm1(t * 3.1 + side * 11.3, 13) * 0.011 * d;
+    var jp = fbm1(t * 2.7 + side * 5.9, 17) * 0.009 * d;
+    /* A slow drift, so a still cursor does not mean a frozen eye. */
+    jy += fbm1(t * 0.23 + side * 3.1, 29) * 0.020 * d;
+    jp += fbm1(t * 0.19 + side * 7.7, 31) * 0.015 * d;
+    return [
+      clamp(this.yaw + jy, -EYE_YAW_MAX, EYE_YAW_MAX),
+      clamp(this.pitch + jp, -EYE_PITCH_MAX, EYE_PITCH_MAX)
+    ];
+  };
+
+  /* ================================================================== */
+  /* 7. Renderer                                                         */
+  /* ================================================================== */
+
+  var MAX_DPR = 2;
+  var COARSE_DPR = 1.5;
+  var SUPER = 1.3;
+  var PERF_WINDOW = 50;
+  var PERF_BUDGET = 24;
+  var FOV = 26 * PI / 180;
+
+  /* How far apart the eyes sit across the frame, in clip units (2.0 is the
+     full width). The whole composition control. */
+  var EYE_SPAN_WIDE = 1.08;
+  var EYE_SPAN_TALL = 1.36;
+
+  /* How far the gaze target travels across the plane of the screen, in
+     metres. Small: at this range a little goes a long way. */
+  var GAZE_REACH = 0.075;
+
+  function Studio(host, canvas) {
+    this.host = host;
+    this.canvas = canvas;
+    this.gl = null;
+    this.beh = new Behaviour();
+    this.raf = 0;
+    this.last = 0;
+    this.frames = 0;
+    this.frameSum = 0;
+    this.scale = 1;
+    this.running = false;
+    this.ready = false;
+    this.W = 0; this.H = 0;
+    this.fitAspect = -1;
+    this.camDist = 0.3;
+    this.mVP = new Float32Array(16);
+    this.mProj = new Float32Array(16);
+    this.mView = new Float32Array(16);
+    this.mModel = new Float32Array(16);
+    this.mNormal = new Float32Array(9);
+    this.eye = [0, 0, 0.3];
+    this.gaze = [0, 0];
+  }
+
+  Studio.prototype.init = function () {
+    var gl = this.canvas.getContext('webgl2', {
+      alpha: false,
+      antialias: false,
+      depth: true,
+      premultipliedAlpha: false,
+      powerPreference: 'high-performance',
+      preserveDrawingBuffer: false
+    });
+    if (!gl) return false;
+    this.gl = gl;
+
+    var mesh = buildAll();
+    this.progSkin = program(gl, SKIN_VS, SKIN_FS, 'skin');
+    this.progEye = program(gl, EYE_VS, EYE_FS, 'eye');
+    this.progPost = program(gl, FULLSCREEN_VS, POST_FS, 'post');
+    this.progBake = program(gl, FULLSCREEN_VS, BAKE_FS, 'bake');
+
+    this.skin = this._upload(mesh.skin, this.progSkin);
+    this.globe = this._upload(mesh.globe, this.progEye);
+    this.lidUp = this._upload(mesh.lidUp, this.progSkin);
+    this.lidLo = this._upload(mesh.lidLo, this.progSkin);
+
+    this._bakeScales();
+    this.emptyVAO = gl.createVertexArray();
+    this.eyeCentres = [eyeCentre(-1), eyeCentre(1)];
+
+    gl.enable(gl.DEPTH_TEST);
+    gl.enable(gl.CULL_FACE);
+    gl.cullFace(gl.BACK);
+    gl.frontFace(gl.CCW);
+    return true;
+  };
+
+  Studio.prototype._upload = function (mesh, prog) {
+    var gl = this.gl;
+    var vao = gl.createVertexArray();
+    gl.bindVertexArray(vao);
+    var vbo = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+    gl.bufferData(gl.ARRAY_BUFFER, mesh.data, gl.STATIC_DRAW);
+    var S = STRIDE * 4;
+    function attr(name, size, off) {
+      var loc = gl.getAttribLocation(prog, name);
+      if (loc < 0) return;
+      gl.enableVertexAttribArray(loc);
+      gl.vertexAttribPointer(loc, size, gl.FLOAT, false, S, off * 4);
+    }
+    attr('aPos', 3, 0);
+    attr('aNrm', 3, 3);
+    attr('aTan', 3, 6);
+    attr('aUV', 2, 9);
+    attr('aSize', 1, 11);
+    attr('aRegion', 1, 12);
+    var ibo = gl.createBuffer();
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, mesh.index, gl.STATIC_DRAW);
+    gl.bindVertexArray(null);
+    return { vao: vao, count: mesh.count };
+  };
+
+  Studio.prototype._bakeScales = function () {
+    var gl = this.gl, size = 2048;
+    this.scaleTex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, this.scaleTex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, size, size, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+
+    var fbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.scaleTex, 0);
+    gl.viewport(0, 0, size, size);
+    gl.disable(gl.DEPTH_TEST);
+    gl.useProgram(this.progBake);
+    gl.uniform2f(this.progBake.u.uSize, size, size);
+    var tmp = gl.createVertexArray();
+    gl.bindVertexArray(tmp);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.bindVertexArray(null);
+    gl.deleteVertexArray(tmp);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.deleteFramebuffer(fbo);
+    gl.enable(gl.DEPTH_TEST);
+
+    gl.bindTexture(gl.TEXTURE_2D, this.scaleTex);
+    gl.generateMipmap(gl.TEXTURE_2D);
+    var aniso = gl.getExtension('EXT_texture_filter_anisotropic');
+    if (aniso) {
+      var max = gl.getParameter(aniso.MAX_TEXTURE_MAX_ANISOTROPY_EXT);
+      gl.texParameterf(gl.TEXTURE_2D, aniso.TEXTURE_MAX_ANISOTROPY_EXT, Math.min(8, max));
+    }
+  };
+
+  Studio.prototype.resize = function () {
+    var gl = this.gl;
+    var rect = this.host.getBoundingClientRect();
+    var coarse = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+    var dpr = Math.min(window.devicePixelRatio || 1, coarse ? COARSE_DPR : MAX_DPR);
+    var w = Math.max(1, Math.round(rect.width * dpr * this.scale));
+    var h = Math.max(1, Math.round(rect.height * dpr * this.scale));
+    if (w === this.W && h === this.H) return;
+    this.W = w; this.H = h;
+    this.canvas.width = w;
+    this.canvas.height = h;
+
+    var sw = Math.max(1, Math.round(w * SUPER));
+    var sh = Math.max(1, Math.round(h * SUPER));
+    this.SW = sw; this.SH = sh;
+
+    if (!this.sceneTex) {
+      this.sceneTex = gl.createTexture();
+      this.depthRB = gl.createRenderbuffer();
+      this.sceneFBO = gl.createFramebuffer();
+    }
+    gl.bindTexture(gl.TEXTURE_2D, this.sceneTex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, sw, sh, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.bindRenderbuffer(gl.RENDERBUFFER, this.depthRB);
+    gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT24, sw, sh);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.sceneFBO);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.sceneTex, 0);
+    gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, this.depthRB);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    this.fitAspect = -1;
+  };
+
+  /* Dead on, centred, far enough back that the eye separation lands where
+     the composition wants it. Tall frames get the eyes bigger, because a
+     phone has width to spare on nothing else. */
+  Studio.prototype.camera = function () {
+    var aspect = this.W / Math.max(1, this.H);
+    if (this.fitAspect === aspect) return;
+    this.fitAspect = aspect;
+    var tall = sat((1.0 - aspect) / 0.5);
+    var span = lerp(EYE_SPAN_WIDE, EYE_SPAN_TALL, tall);
+    /* Projected separation goes as 1/distance. */
+    this.camDist = clamp(EYE_SEP / (span * Math.tan(FOV * 0.5) * aspect), 0.08, 1.5);
+    this.eye = [0, 0, this.camDist];
+    mPerspective(this.mProj, FOV, aspect, 0.01, 4);
+    mLookAt(this.mView, this.eye, [0, 0, 0], [0, 1, 0]);
+    mMul(this.mVP, this.mProj, this.mView);
+  };
+
+  Studio.prototype.frame = function () {
+    var gl = this.gl;
+    /*
+     * One clock, read here. Mixing the rAF timestamp with performance.now()
+     * yields a negative first delta — the frame timestamp predates the
+     * moment the callback runs — and a negative dt runs every spring in
+     * the behaviour backwards, which detonates them.
+     */
+    var now = (window.performance || Date).now();
+    if (!this.last) this.last = now;
+    var dt = (now - this.last) / 1000;
+    this.last = now;
+    dt = dt > 0.05 ? 0.05 : (dt < 0 ? 0 : dt);
+
+    this.camera();
+
+    /* The target sits on the plane of the screen, which is where the
+       visitor is: straight down the lens when the pointer is at rest. */
+    var nx = clamp(this.gaze[0], -1.6, 1.6);
+    var ny = clamp(this.gaze[1], -1.4, 1.4);
+    var tx = nx * GAZE_REACH, ty = -ny * GAZE_REACH, tz = this.camDist;
+    var dz = tz - this.eyeCentres[0][2];
+    this.beh.setTarget(Math.atan2(tx, dz),
+      Math.atan2(ty, Math.sqrt(tx * tx + dz * dz)));
+    this.beh.step(dt);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.sceneFBO);
+    gl.viewport(0, 0, this.SW, this.SH);
+    gl.clearColor(0.02, 0.02, 0.02, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    var sock = [EYE_SEP * 0.5, 0.0165];
+    var i, k;
+
+    /* ---- skin ---- */
+    var ps = this.progSkin;
+    gl.useProgram(ps);
+    mIdent(this.mModel);
+    mNormal3(this.mNormal, this.mModel);
+    gl.uniformMatrix4fv(ps.u.uVP, false, this.mVP);
+    gl.uniformMatrix4fv(ps.u.uModel, false, this.mModel);
+    gl.uniformMatrix3fv(ps.u.uModelN, false, this.mNormal);
+    gl.uniform3fv(ps.u.uEye, this.eye);
+    gl.uniform2fv(ps.u.uSocket, sock);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.scaleTex);
+    gl.uniform1i(ps.u.uScales, 0);
+    gl.bindVertexArray(this.skin.vao);
+    gl.drawElements(gl.TRIANGLES, this.skin.count, gl.UNSIGNED_INT, 0);
+
+    /* ---- globes ---- */
+    var pe = this.progEye;
+    var aims = [];
+    gl.useProgram(pe);
+    gl.uniformMatrix4fv(pe.u.uVP, false, this.mVP);
+    gl.uniform3fv(pe.u.uEye, this.eye);
+    gl.uniform2fv(pe.u.uSocket, sock);
+    gl.bindVertexArray(this.globe.vao);
+    for (i = 0; i < 2; i++) {
+      var side = i === 0 ? -1 : 1;
+      var a = this.beh.aimFor(side);
+      aims.push(a);
+      var q = qmul(qAxis([0, 1, 0], a[0]), qAxis([1, 0, 0], -a[1]));
+      mFromRT(this.mModel, q, this.eyeCentres[i]);
+      mNormal3(this.mNormal, this.mModel);
+      gl.uniformMatrix4fv(pe.u.uModel, false, this.mModel);
+      gl.uniformMatrix3fv(pe.u.uModelN, false, this.mNormal);
+      /* The fragment shader also needs the inverse rotation, to take a
+         world vector back into globe space. For a pure rotation that is
+         the transpose, which uniformMatrix3fv will do on the way in. */
+      gl.uniformMatrix3fv(pe.u.uModelT, true, this.mNormal);
+      gl.drawElements(gl.TRIANGLES, this.globe.count, gl.UNSIGNED_INT, 0);
+    }
+
+    /* ---- lids ---- */
+    gl.useProgram(ps);
+    for (i = 0; i < 2; i++) {
+      var sd = i === 0 ? -1 : 1;
+      var cl = this.beh.blinkFor(sd);
+      var aim = aims[i];
+      /* Lids ride the globe's aim, and open by rolling back off it. */
+      var base = qmul(qAxis([0, 1, 0], aim[0] * 0.55), qAxis([1, 0, 0], -aim[1] * 0.55));
+      /*
+       * Signs matter here. Rotating the upper lid's pole towards +Z drags
+       * it ACROSS the gaze; away from +Z rolls it off. Get it backwards
+       * and the eye sits shut and blinks itself open.
+       */
+      /*
+       * Open, but not wide open. A lid rolled right back leaves a circle
+       * of sclera showing and the eye reads as a bead stuck on a surface;
+       * brought down to about twenty-five degrees off the axis it leaves
+       * an almond, which is both what a real one does and the whole of
+       * the difference between alert and alarmed.
+       */
+      var pairs = [
+        [this.lidUp, -0.20 + cl * 0.55 - aim[1] * 0.34],
+        [this.lidLo, 0.27 - cl * 0.57 - aim[1] * 0.14]
+      ];
+      for (k = 0; k < 2; k++) {
+        var q2 = qmul(base, qAxis([1, 0, 0], pairs[k][1]));
+        mFromRT(this.mModel, q2, this.eyeCentres[i]);
+        mNormal3(this.mNormal, this.mModel);
+        gl.uniformMatrix4fv(ps.u.uModel, false, this.mModel);
+        gl.uniformMatrix3fv(ps.u.uModelN, false, this.mNormal);
+        gl.bindVertexArray(pairs[k][0].vao);
+        gl.drawElements(gl.TRIANGLES, pairs[k][0].count, gl.UNSIGNED_INT, 0);
+      }
+    }
+
+    /* ---- post ---- */
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, this.W, this.H);
+    gl.disable(gl.DEPTH_TEST);
+    gl.useProgram(this.progPost);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.sceneTex);
+    gl.uniform1i(this.progPost.u.uScene, 0);
+    gl.uniform2f(this.progPost.u.uTexel, 1 / this.W, 1 / this.H);
+    gl.uniform1f(this.progPost.u.uTime, this.beh.t);
+    gl.uniform1f(this.progPost.u.uGrain, 0.012);
+    gl.bindVertexArray(this.emptyVAO);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.bindVertexArray(null);
+    gl.enable(gl.DEPTH_TEST);
+
+    if (!this.ready) {
+      this.ready = true;
+      this.host.classList.add('is-gl', 'is-ready');
+    }
+  };
+
+  /* Drop the render scale rather than the frame rate on slow hardware. */
+  Studio.prototype.measure = function (ms) {
+    this.frameSum += ms;
+    this.frames++;
+    if (this.frames < PERF_WINDOW) return;
+    var avg = this.frameSum / this.frames;
+    this.frames = 0; this.frameSum = 0;
+    if (avg > PERF_BUDGET && this.scale > 0.55) {
+      this.scale = Math.max(0.55, this.scale - 0.15);
+      this.W = this.H = 0;
+      this.resize();
+    } else if (avg < PERF_BUDGET * 0.5 && this.scale < 1) {
+      this.scale = Math.min(1, this.scale + 0.1);
+      this.W = this.H = 0;
+      this.resize();
+    }
+  };
+
+  Studio.prototype.start = function () {
+    if (this.running) return;
+    this.running = true;
+    this.last = 0;   // re-baselined next frame, so a long pause never
+                     // arrives as one enormous time step
+    var self = this;
+    (function loop() {
+      if (!self.running) return;
+      self.raf = window.requestAnimationFrame(loop);
+      var t0 = (window.performance || Date).now();
+      self.resize();
+      try {
+        self.frame();
+      } catch (e) {
+        self.stop();
+        return;
+      }
+      self.measure((window.performance || Date).now() - t0);
+    })();
+  };
+
+  Studio.prototype.stop = function () {
+    this.running = false;
+    if (this.raf) window.cancelAnimationFrame(this.raf);
+    this.raf = 0;
+  };
+
+  /* ================================================================== */
+  /* 8. Mount                                                            */
+  /* ================================================================== */
+
+  var IDLE_AFTER = 4000;        // ms of no input before the gaze wanders
+  var TILT_RANGE = 30;          // degrees of tilt mapped to full deflection
+  var TILT_SETTLE = 1800;
+
+  function splitLetters(el) {
+    if (!el || el.dataset.kwadSplit === '1') return;
+    var text = el.textContent;
+    var frag = document.createDocumentFragment();
+    var chars = Array.prototype.slice.call(text);
+    var i, n = chars.length;
+    for (i = 0; i < n; i++) {
+      var span = document.createElement('span');
+      span.className = 'kwad-soon__ch';
+      span.textContent = chars[i];
+      span.style.setProperty('--i', String(i));
+      span.style.setProperty('--n', String(n));
+      span.setAttribute('aria-hidden', 'true');
+      frag.appendChild(span);
+    }
+    /* Keep the original string for anything that reads the page rather
+       than looks at it. */
+    var sr = document.createElement('span');
+    sr.className = 'visually-hidden';
+    sr.style.cssText = 'position:absolute;width:1px;height:1px;overflow:hidden;' +
+      'clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap';
+    sr.textContent = text;
+    el.textContent = '';
+    el.appendChild(sr);
+    el.appendChild(frag);
+    el.dataset.kwadSplit = '1';
+  }
+
+  function mount(host) {
+    if (host.dataset.kwadMounted === '1') return;
+    host.dataset.kwadMounted = '1';
+
+    var words = host.querySelectorAll('[data-kwad-split]');
+    for (var wi = 0; wi < words.length; wi++) splitLetters(words[wi]);
+
+    var canvas = document.createElement('canvas');
+    canvas.className = 'kwad-soon__gl';
+    canvas.setAttribute('aria-hidden', 'true');
+    var floor = host.querySelector('.kwad-soon__floor');
+    if (floor) host.insertBefore(canvas, floor.nextSibling);
+    else host.insertBefore(canvas, host.firstChild);
+
+    var studio = new Studio(host, canvas);
+    var ok = false;
+    try {
+      ok = studio.init();
+    } catch (e) {
+      ok = false;
+      if (window.console && window.console.warn) window.console.warn(e.message);
+    }
+    if (!ok) {
+      canvas.parentNode.removeChild(canvas);
+      /* Still animate the wordmark — the page is not broken, it just has
+         nothing looking out of it. */
+      host.classList.add('is-ready');
+      return;
+    }
+
+    var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
+    function applyReduce() {
+      studio.beh.damp = (reduce && reduce.matches) ? 0.25 : 1;
+    }
+    applyReduce();
+    if (reduce && reduce.addEventListener) reduce.addEventListener('change', applyReduce);
+
+    /* ---- pointer ---------------------------------------------------- */
+    var lastInput = 0, idleSeed = Math.random() * 100;
+
+    function setGaze(nx, ny) {
+      studio.gaze[0] = nx;
+      studio.gaze[1] = ny;
     }
 
     function onPointer(ev) {
-      var w = window.innerWidth || 1;
-      var h = window.innerHeight || 1;
-      if (ev.pointerType === 'touch') S.lastTouch = Date.now();
-      setRaw(ev.clientX / w * 2 - 1, -(ev.clientY / h * 2 - 1),
-        ev.pointerType === 'touch' ? 'touch' : 'pointer');
-    }
-
-    function onOrient(ev) {
-      if (ev.gamma === null || ev.gamma === undefined) return;
-      // A finger drag and the gyro fighting each other looks broken, so a
-      // recent touch wins.
-      if (Date.now() - S.lastTouch < TILT_SETTLE) return;
-      if (S.restBeta === null) S.restBeta = ev.beta || 0;
-
-      var gx = clamp(ev.gamma / TILT_RANGE, -1, 1);
-      var gy = clamp(((ev.beta || 0) - S.restBeta) / TILT_RANGE, -1, 1);
-
-      // Correct for screen rotation, so tilting "right" is right whichever
-      // way the phone is held.
-      var ang = 0;
-      if (window.screen && window.screen.orientation &&
-          typeof window.screen.orientation.angle === 'number') {
-        ang = window.screen.orientation.angle;
-      } else if (typeof window.orientation === 'number') {
-        ang = window.orientation;
-      }
-      var r = -ang * Math.PI / 180;
-      var cs = Math.cos(r), sn = Math.sin(r);
-      setRaw(gx * cs - gy * sn, -(gx * sn + gy * cs), 'tilt');
-
-      if (!S.tiltOK) { S.tiltOK = true; if (onFirstTilt) onFirstTilt(); }
-    }
-
-    function attachOrient() {
-      window.addEventListener('deviceorientation', onOrient, false);
-    }
-
-    function recalibrate() { S.restBeta = null; }
-
-    /* iOS gates the sensor behind a permission call that only works inside a
-       user gesture, so it needs a real button. Android just works. */
-    function setupTilt() {
-      var DOE = window.DeviceOrientationEvent;
-      if (!DOE) return;
-
-      if (typeof DOE.requestPermission !== 'function') {
-        attachOrient();
-        return;
-      }
-
-      if (store(STORE_KEY) === 'granted') {
-        DOE.requestPermission().then(function (res) {
-          if (res === 'granted') attachOrient();
-          else showButton();
-        })['catch'](showButton);
-        return;
-      }
-      showButton();
-
-      function showButton() {
-        if (btn) { btn.hidden = false; return; }
-        btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'kwad-soon__tilt';
-        btn.textContent = 'Tap to let it watch you';
-        btn.addEventListener('click', function () {
-          DOE.requestPermission().then(function (res) {
-            if (res !== 'granted') return;
-            store(STORE_KEY, 'granted');
-            attachOrient();
-            btn.hidden = true;
-            // Safari has been known to grant and then send nothing. If no
-            // event lands, put the prompt back rather than silently failing.
-            window.setTimeout(function () {
-              if (!S.tiltOK && btn) btn.hidden = false;
-            }, 1500);
-          })['catch'](function () { /* denied — the touch path still works */ });
-        }, false);
-        root.appendChild(btn);
-      }
+      var rect = host.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+      lastInput = (window.performance || Date).now();
+      setGaze(((ev.clientX - rect.left) / rect.width) * 2 - 1,
+        ((ev.clientY - rect.top) / rect.height) * 2 - 1);
     }
 
     window.addEventListener('pointermove', onPointer, { passive: true });
     window.addEventListener('pointerdown', onPointer, { passive: true });
-    window.addEventListener('orientationchange', recalibrate, false);
-    setupTilt();
 
-    S.hideButton = function () { if (btn) btn.hidden = true; };
-    S.destroy = function () {
-      window.removeEventListener('pointermove', onPointer);
-      window.removeEventListener('pointerdown', onPointer);
-      window.removeEventListener('orientationchange', recalibrate);
-      window.removeEventListener('deviceorientation', onOrient);
-      if (btn && btn.parentNode) btn.parentNode.removeChild(btn);
-    };
-    return S;
-  }
+    /* ---- device tilt ------------------------------------------------ */
+    /*
+     * On a handset the visitor moves the phone, not a cursor. Counter-
+     * rotating against beta and gamma keeps the eye line on the person
+     * holding it, so tilting never breaks the stare.
+     */
+    var tiltOn = false;
+    var tiltBtn = host.querySelector('[data-kwad-tilt]');
 
-  /* ------------------------------------------------------------------ */
-  /* The splash                                                          */
-  /* ------------------------------------------------------------------ */
+    function onTilt(ev) {
+      if (ev.beta === null && ev.gamma === null) return;
+      var now = (window.performance || Date).now();
+      if (now - lastInput < TILT_SETTLE) return;
+      setGaze(-clamp((ev.gamma || 0) / TILT_RANGE, -1.5, 1.5),
+        -clamp(((ev.beta || 0) - 48) / TILT_RANGE, -1.5, 1.5));
+      if (tiltBtn) tiltBtn.classList.remove('is-visible');
+    }
 
-  function createSplash(root) {
-    var canvas = document.createElement('canvas');
-    canvas.className = 'kwad-soon__gl';
-    canvas.setAttribute('aria-hidden', 'true');
-    canvas.setAttribute('role', 'presentation');
+    function enableTilt() {
+      if (tiltOn) return;
+      tiltOn = true;
+      window.addEventListener('deviceorientation', onTilt, { passive: true });
+    }
 
-    var gl = getContext(canvas);
-    if (!gl) return null;
+    var needsGesture = typeof window.DeviceOrientationEvent !== 'undefined' &&
+      typeof window.DeviceOrientationEvent.requestPermission === 'function';
 
-    var prog = link(gl, VERT, buildFrag(gl));
-    if (!prog) return null;
+    if (typeof window.DeviceOrientationEvent !== 'undefined') {
+      if (needsGesture) {
+        if (tiltBtn) {
+          tiltBtn.classList.add('is-visible');
+          tiltBtn.addEventListener('click', function () {
+            window.DeviceOrientationEvent.requestPermission().then(function (state) {
+              if (state === 'granted') enableTilt();
+              tiltBtn.classList.remove('is-visible');
+            })['catch'](function () {
+              tiltBtn.classList.remove('is-visible');
+            });
+          });
+        }
+      } else if (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) {
+        enableTilt();
+      }
+    }
 
-    root.insertBefore(canvas, root.firstChild);
-    root.classList.add('is-gl');
+    /* ---- idle drift -------------------------------------------------- */
+    /* With nobody there it stops staring down the lens and looks about,
+       which is the difference between a model and an animal. */
+    var idleRAF = 0;
+    (function idle() {
+      idleRAF = window.requestAnimationFrame(idle);
+      var now = (window.performance || Date).now();
+      if (now - lastInput < IDLE_AFTER) return;
+      var t = now / 1000 + idleSeed;
+      var k = smoothstep(0, 1, Math.min(1, (now - lastInput - IDLE_AFTER) / 2500));
+      setGaze(fbm1(t * 0.15, 31) * 1.3 * k, fbm1(t * 0.12, 37) * 0.9 * k);
+    })();
 
-    var buf = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-    // One triangle, not a quad: no diagonal seam in the derivatives.
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
-    var aPos = gl.getAttribLocation(prog, 'aPos');
-    gl.enableVertexAttribArray(aPos);
-    gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+    /* ---- lifecycle --------------------------------------------------- */
+    var visible = true, onScreen = true;
 
-    var U = {};
-    ['uRes', 'uT', 'uLook', 'uGazeL', 'uGazeR', 'uBlink', 'uPupil',
-     'uQuality', 'uIntro', 'uText', 'uTextRect'].forEach(function (n) {
-      U[n] = gl.getUniformLocation(prog, n);
+    function sync() {
+      if (visible && onScreen) studio.start(); else studio.stop();
+    }
+
+    document.addEventListener('visibilitychange', function () {
+      visible = !document.hidden;
+      sync();
     });
 
-    var tex = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, tex);
-    // NPOT is legal in WebGL1 with CLAMP_TO_EDGE, LINEAR and no mipmaps,
-    // which saves padding the atlas out to a power of two.
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
-    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
-
-    var reduceQ = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
-    var coarseQ = window.matchMedia ? window.matchMedia('(pointer: coarse)') : null;
-    var reduced = !!(reduceQ && reduceQ.matches);
-    var coarse = !!(coarseQ && coarseQ.matches);
-
-    var input = createInput(root, function () { /* first tilt event */ });
-
-    var G = {
-      w: 0, h: 0, dpr: 1, scale: 1,
-      textDirty: true, textAspect: 1,
-      time: 0, motion: reduced ? 12 : 0, intro: 0,
-      gazeL: { x: 0, y: 0 }, gazeR: { x: 0, y: 0 },
-      held: { x: 0, y: 0 }, from: { x: 0, y: 0 }, sacT: 1,
-      blinkAt: Date.now() + rnd(BLINK_MIN, BLINK_MAX), blink: 0, blinkPhase: 0,
-      pupil: 1, wander: { x: 0, y: 0, at: 0 },
-      frames: 0, acc: 0, lost: false
-    };
-
-    /* ---------- sizing ------------------------------------------------ */
-
-    function measure() {
-      var r = root.getBoundingClientRect();
-      G.w = Math.max(1, Math.round(r.width));
-      G.h = Math.max(1, Math.round(r.height));
-      G.dpr = Math.min(window.devicePixelRatio || 1, coarse ? COARSE_DPR : MAX_DPR);
-    }
-
-    function applySize() {
-      var bw = Math.max(1, Math.round(G.w * G.dpr * G.scale));
-      var bh = Math.max(1, Math.round(G.h * G.dpr * G.scale));
-      if (canvas.width !== bw || canvas.height !== bh) {
-        canvas.width = bw;
-        canvas.height = bh;
-      }
-      gl.viewport(0, 0, bw, bh);
-    }
-
-    function uploadText() {
-      var cv = buildTextAtlas(G.w, G.dpr);
-      G.textAspect = cv.width / cv.height;
-      gl.bindTexture(gl.TEXTURE_2D, tex);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, cv);
-      G.textDirty = false;
-    }
-
-    /* ---------- gaze --------------------------------------------------- */
-
-    /* Per-eye vergence: each eye aims at the cursor independently, which is
-       free and reads as much more alive than one shared direction. */
-    function gazeFor(tx, ty, ex, ey) {
-      var dx = tx - ex, dy = ty - ey;
-      var d = Math.sqrt(dx * dx + dy * dy) + 1e-4;
-      var s = GAZE_MAX / (1 + d) * Math.min(1, d * 3);
-      return { x: dx / d * s, y: dy / d * s };
-    }
-
-    function updateGaze(dt) {
-      var now = Date.now();
-      var k = clamp(Math.min(G.w, G.h) / Math.max(G.w, G.h) * 1.6, 0.62, 1);
-      var idle = now - input.lastInput > IDLE_AFTER;
-
-      // Where the eyes want to look, in the shader's p-space.
-      var aspect = G.w / Math.max(1, G.h);
-      var tx, ty;
-      if (idle) {
-        if (now > G.wander.at) {
-          G.wander.x = rnd(-0.5, 0.5) * aspect;
-          G.wander.y = rnd(-0.4, 0.4);
-          G.wander.at = now + rnd(800, 2200);
-        }
-        tx = G.wander.x; ty = G.wander.y;
-      } else {
-        tx = input.raw.x * 0.5 * (aspect > 1 ? aspect : 1);
-        ty = input.raw.y * 0.5 * (aspect > 1 ? 1 : 1 / aspect);
-      }
-
-      // Real eyes hold, then jump. Tracking continuously is instant
-      // googly-eyes, so only re-aim once the target has moved enough.
-      var dx = tx - G.held.x, dy = ty - G.held.y;
-      if (dx * dx + dy * dy > SACCADE_EPS * SACCADE_EPS) {
-        G.from.x = G.gazeL.x; G.from.y = G.gazeL.y;
-        G.held.x = tx; G.held.y = ty;
-        G.sacT = 0;
-      }
-      G.sacT = Math.min(1, G.sacT + dt / SACCADE_MS);
-
-      var u = ease3(G.sacT);
-      var tL = gazeFor(G.held.x, G.held.y, -0.225, 0.16);
-      var tR = gazeFor(G.held.x, G.held.y, 0.225, 0.16);
-
-      // Micro-saccades: two decorrelated slow walks, always on.
-      var mx = 0, my = 0;
-      if (!reduced) {
-        mx = Math.sin(G.time * 4.3) * Math.sin(G.time * 1.7) * 0.012;
-        my = Math.sin(G.time * 3.9 + 2.1) * Math.sin(G.time * 1.3) * 0.010;
-      }
-
-      G.gazeL.x = lerp(G.from.x, tL.x, u) + mx;
-      G.gazeL.y = lerp(G.from.y, tL.y, u) + my;
-      G.gazeR.x = lerp(G.from.x, tR.x, u) + mx;
-      G.gazeR.y = lerp(G.from.y, tR.y, u) + my;
-
-      // Pupil constricts when the light is head-on, plus a slow breath.
-      var lit = 1 - clamp(Math.sqrt(input.look.x * input.look.x + input.look.y * input.look.y), 0, 1);
-      G.pupil = lerp(G.pupil, 0.82 + 0.34 * (1 - lit) + (reduced ? 0 : 0.04 * Math.sin(G.time * 0.7)), 0.05);
-
-      // Blinks.
-      if (reduced) { G.blink = 0; return; }
-      if (G.blinkPhase === 0 && now > G.blinkAt) { G.blinkPhase = 1; G.blinkAt = now; }
-      if (G.blinkPhase === 1) {
-        G.blink = clamp((now - G.blinkAt) / BLINK_CLOSE, 0, 1);
-        if (G.blink >= 1) { G.blinkPhase = 2; G.blinkAt = now; }
-      } else if (G.blinkPhase === 2) {
-        G.blink = 1 - clamp((now - G.blinkAt) / BLINK_OPEN, 0, 1);
-        if (G.blink <= 0) {
-          G.blinkPhase = 0;
-          // ~15% of blinks come in pairs.
-          G.blinkAt = now + (Math.random() < 0.15 ? 140 : rnd(BLINK_MIN, BLINK_MAX));
-        }
-      }
-    }
-
-    /* ---------- simulation --------------------------------------------- */
-
-    function tick(dt) {
-      G.time += dt / 1000;
-      if (!reduced) G.motion += dt / 1000;
-      G.intro = Math.min(1, G.intro + dt / 1200);
-
-      var now = Date.now();
-      var since = now - input.lastInput;
-      var target = { x: input.raw.x, y: input.raw.y };
-
-      // After a while with no input, drift on a slow Lissajous, cross-faded
-      // in so it never snaps.
-      if (!reduced) {
-        var want = since > IDLE_AFTER ? 1 : 0;
-        input.idleMix = clamp(input.idleMix + (want ? dt : -dt) / IDLE_FADE, 0, 1);
-        if (input.idleMix > 0) {
-          var ix = 0.42 * Math.sin(G.time * 0.21);
-          var iy = 0.30 * Math.sin(G.time * 0.17 + 1.3);
-          target.x = lerp(target.x, ix, input.idleMix);
-          target.y = lerp(target.y, iy, input.idleMix);
-        }
-      }
-
-      // Critically damped spring, inside the fixed step so it is framerate
-      // independent.
-      var h = dt / 1000;
-      var w = LOOK_OMEGA;
-      var ax = (target.x - input.look.x) * w * w - input.vel.x * 2 * w;
-      var ay = (target.y - input.look.y) * w * w - input.vel.y * 2 * w;
-      input.vel.x += ax * h; input.vel.y += ay * h;
-      input.look.x += input.vel.x * h; input.look.y += input.vel.y * h;
-
-      updateGaze(dt);
-
-      // The CSS fallback eyes read these, so they track too.
-      root.style.setProperty('--kwad-gaze-x', input.look.x.toFixed(3));
-      root.style.setProperty('--kwad-gaze-y', input.look.y.toFixed(3));
-    }
-
-    function draw() {
-      if (G.textDirty) uploadText();
-
-      gl.useProgram(prog);
-      gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-      gl.enableVertexAttribArray(aPos);
-      gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
-
-      gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, tex);
-      gl.uniform1i(U.uText, 0);
-
-      gl.uniform2f(U.uRes, canvas.width, canvas.height);
-      gl.uniform1f(U.uT, G.motion % 600);
-      gl.uniform2f(U.uLook, input.look.x, input.look.y);
-      gl.uniform2f(U.uGazeL, G.gazeL.x, G.gazeL.y);
-      gl.uniform2f(U.uGazeR, G.gazeR.x, G.gazeR.y);
-      gl.uniform1f(U.uBlink, G.blink);
-      gl.uniform1f(U.uPupil, G.pupil);
-      gl.uniform1f(U.uQuality, G.scale >= 1 && !coarse ? 1 : 0);
-      gl.uniform1f(U.uIntro, G.intro);
-
-      // Text block: hung from just under the lower lids and fitted to
-      // whatever room is left above the bottom edge. Deriving it rather than
-      // hard-coding is what keeps it clear of the eyes in portrait and off
-      // the bottom edge in landscape.
-      var mn = Math.min(G.w, G.h);
-      var edgeY = (G.h / 2) / mn;                 // bottom of the screen, in p-space
-      var topY = 0.16 - 0.111 - 0.04;             // just below the eye aperture
-      var halfW = (G.w / 2) / mn * 0.88;
-      var halfH = halfW / Math.max(0.001, G.textAspect);
-      var maxH = Math.max(0.04, (topY + edgeY - 0.05) / 2);
-      if (halfH > maxH) { halfH = maxH; halfW = halfH * G.textAspect; }
-      gl.uniform4f(U.uTextRect, 0, topY - halfH, halfW, halfH);
-
-      gl.drawArrays(gl.TRIANGLES, 0, 3);
-    }
-
-    /* ---------- loop --------------------------------------------------- */
-
-    var last = 0, running = true, visible = true, raf = 0, perf = 0, perfN = 0;
-
-    function frame(now) {
-      raf = 0;
-      if (!running || !visible || G.lost) return;
-      if (!last) last = now;
-      var delta = Math.min(100, now - last);
-      last = now;
-
-      G.acc += delta;
-      var steps = 0;
-      while (G.acc >= STEP && steps < 4) { tick(STEP); G.acc -= STEP; steps++; }
-      if (steps === 4) G.acc = 0;
-
-      draw();
-
-      // Adaptive render scale. Everything here is smooth shading with no
-      // hard edges, so dropping the buffer is nearly invisible and buys far
-      // more than trimming the shader would.
-      perf += delta; perfN++;
-      if (perfN >= PERF_WINDOW) {
-        if (perf / perfN > PERF_BUDGET && G.scale > 0.6) {
-          G.scale = G.scale > 0.75 ? 0.75 : 0.6;
-          applySize();
-        }
-        perf = 0; perfN = 0;
-      }
-
-      raf = window.requestAnimationFrame(frame);
-    }
-
-    function start() {
-      if (raf || !running || !visible || G.lost) return;
-      last = 0;
-      raf = window.requestAnimationFrame(frame);
-    }
-
-    function stop() {
-      if (raf) window.cancelAnimationFrame(raf);
-      raf = 0;
-    }
-
-    /* ---------- wiring -------------------------------------------------- */
-
-    function resize() {
-      var oldW = G.w;
-      var oldDpr = G.dpr;
-      measure();
-      applySize();
-      if (Math.abs(G.w - oldW) > 1 || G.dpr !== oldDpr) G.textDirty = true;
-      start();
-    }
-
-    var resizeTimer = 0;
-    function onResize() {
-      if (resizeTimer) window.clearTimeout(resizeTimer);
-      resizeTimer = window.setTimeout(resize, 120);
-    }
-
-    function onVisibility() {
-      visible = !document.hidden;
-      if (visible) {
-        // Don't fire a blink the instant the tab comes back.
-        G.blinkAt = Date.now() + rnd(BLINK_MIN, BLINK_MAX);
-        start();
-      } else {
-        stop();
-      }
-    }
-
-    function onReduceChange(ev) {
-      reduced = ev.matches;
-      if (reduced) G.motion = 12;
-    }
-
-    // Mobile Safari drops contexts under memory pressure. Without this the
-    // page goes black and stays black.
-    function onLost(ev) { ev.preventDefault(); G.lost = true; stop(); }
-    function onRestored() {
-      G.lost = false;
-      root.classList.remove('is-gl');
-      // Simplest correct recovery: tear down and mount again.
-      api.destroy();
-      window.setTimeout(function () { mountAll(document); }, 0);
-    }
-
-    canvas.addEventListener('webglcontextlost', onLost, false);
-    canvas.addEventListener('webglcontextrestored', onRestored, false);
-    document.addEventListener('visibilitychange', onVisibility, false);
-
-    var ro = null;
-    if (window.ResizeObserver) {
-      ro = new window.ResizeObserver(onResize);
-      ro.observe(root);
-    } else {
-      window.addEventListener('resize', onResize, false);
-    }
-
-    if (reduceQ) {
-      if (reduceQ.addEventListener) reduceQ.addEventListener('change', onReduceChange);
-      else if (reduceQ.addListener) reduceQ.addListener(onReduceChange);
-    }
-
-    var io = null;
     if (window.IntersectionObserver) {
-      io = new window.IntersectionObserver(function (entries) {
-        var vis = entries[entries.length - 1].isIntersecting;
-        running = vis;
-        if (vis) start(); else stop();
-      }, { threshold: 0.15 });
-      io.observe(root);
+      var io = new IntersectionObserver(function (entries) {
+        onScreen = entries[0].isIntersecting;
+        sync();
+      }, { threshold: 0.01 });
+      io.observe(host);
     }
 
-    var api = {
-      destroy: function () {
-        stop();
-        if (ro) ro.disconnect();
-        else window.removeEventListener('resize', onResize);
-        if (io) io.disconnect();
-        document.removeEventListener('visibilitychange', onVisibility);
-        canvas.removeEventListener('webglcontextlost', onLost);
-        canvas.removeEventListener('webglcontextrestored', onRestored);
-        if (reduceQ) {
-          if (reduceQ.removeEventListener) reduceQ.removeEventListener('change', onReduceChange);
-          else if (reduceQ.removeListener) reduceQ.removeListener(onReduceChange);
-        }
-        input.destroy();
-        if (canvas.parentNode) canvas.parentNode.removeChild(canvas);
-        root.classList.remove('is-gl');
-        root.__kwadSoon = null;
-      }
-    };
+    canvas.addEventListener('webglcontextlost', function (e) {
+      e.preventDefault();
+      studio.stop();
+    });
 
-    measure();
-    applySize();
-    start();
-    return api;
+    window.addEventListener('pagehide', function () {
+      studio.stop();
+      if (idleRAF) window.cancelAnimationFrame(idleRAF);
+    });
+
+    studio.start();
   }
 
-  /* ------------------------------------------------------------------ */
-  /* Mount                                                               */
-  /* ------------------------------------------------------------------ */
-
-  function mountAll(scope) {
-    var nodes = (scope || document).querySelectorAll('[data-kwadzilla-soon]');
-    var i, api;
-    for (i = 0; i < nodes.length; i++) {
-      if (nodes[i].__kwadSoon) continue;
-      api = createSplash(nodes[i]);
-      // No API means no WebGL — the CSS fallback is already on screen.
-      if (api) nodes[i].__kwadSoon = api;
-    }
+  function boot() {
+    var hosts = document.querySelectorAll('[data-kwadzilla-soon]');
+    for (var i = 0; i < hosts.length; i++) mount(hosts[i]);
   }
 
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', function () { mountAll(document); });
+    document.addEventListener('DOMContentLoaded', boot);
   } else {
-    mountAll(document);
+    boot();
   }
 
-  // Shopify's theme editor tears sections down and rebuilds them in place.
-  document.addEventListener('shopify:section:load', function (ev) { mountAll(ev.target); });
-  document.addEventListener('shopify:section:unload', function (ev) {
-    var nodes = ev.target.querySelectorAll('[data-kwadzilla-soon]');
-    var i;
-    for (i = 0; i < nodes.length; i++) {
-      if (nodes[i].__kwadSoon) nodes[i].__kwadSoon.destroy();
-    }
-  });
-
-  window.KwadzillaSplash = { mount: mountAll };
-})();
+  /* Shopify's theme editor tears sections down and rebuilds them. */
+  document.addEventListener('shopify:section:load', boot);
+}());
